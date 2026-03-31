@@ -26,7 +26,13 @@ SECRET_KEY = 'django-insecure-$aivdzpie&sn@-dto1epe$titr7qcv5x$8#du@^9xxcam7v--v
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    'grimanhwa-api-production.up.railway.app',
+    '127.0.0.1', 
+    'localhost',
+    '10.7.6.206'
+    '10.7.6.205'
+]
 
 load_dotenv()
 
