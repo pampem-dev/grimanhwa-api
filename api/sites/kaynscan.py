@@ -9,6 +9,8 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import requests
+from api.services import get_selenium_driver 
+import threading
 
 # Simple in-memory cache for chapter pages
 _chapter_cache = {}
@@ -791,98 +793,78 @@ def manga_info(manga_id):
         print(f"Manga info failed: {e}")
         return []
 
-# Import your service
-from api.services import get_selenium_driver 
+
+# --- NEW: GLOBAL LOCK ---
+# This prevents multiple requests from spawning multiple Chrome instances
+# and crashing your Railway server (OOM 503 error).
+selenium_lock = threading.Lock()
 
 def chapter_pages(chapter_id):
     if not chapter_id:
         return []
 
-    # 1. Cache Check (Keep your existing cache logic here)
+    # 1. Cache Check (Outside the lock for speed)
     current_time = time.time()
     if chapter_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[chapter_id]
         if current_time - cached_time < _cache_timeout:
             return cached_data
 
-    # 2. Force Selenium for Asura
-    # We skip requests because it will 100% fail on a server IP
-    print(f"DEBUG: Using Stealth Selenium for: {chapter_id}")
+    # 2. Sequential Execution with Lock
+    print(f"DEBUG: Request queued for: {chapter_id}")
     
-    # USE YOUR SERVICE FUNCTION HERE
-    driver = get_selenium_driver() 
+    with selenium_lock:
+        print(f"DEBUG: Starting Stealth Selenium for: {chapter_id}")
+        driver = get_selenium_driver() 
 
-    try:
-        driver.get(chapter_id)
-        
-        # Give Cloudflare 3 seconds to clear the challenge
-        time.sleep(3) 
-        
-        # 3. OPTIMIZED Scrolling for Large Chapters
-        # Smart scrolling that prioritizes speed and completeness
-        print("DEBUG: Starting optimized scrolling for large chapter...")
-        
-        # Strategy 1: Quick height detection and smart scrolling
-        initial_height = driver.execute_script("return document.body.scrollHeight")
-        max_scrolls = 15  # More scrolls for large chapters
-        no_growth_count = 0
-        
-        for scroll_num in range(max_scrolls):
-            # Scroll to bottom
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)  # Shorter wait for faster processing
+        try:
+            driver.get(chapter_id)
             
-            # Check if new content loaded
-            current_height = driver.execute_script("return document.body.scrollHeight")
-            if current_height > initial_height:
-                initial_height = current_height
-                no_growth_count = 0
-                print(f"DEBUG: New content found at scroll {scroll_num + 1}, height: {current_height}")
-            else:
-                no_growth_count += 1
+            # Brief pause for Cloudflare/Initial Load
+            time.sleep(4) 
+            
+            # 3. FAST OPTIMIZED SCROLLING
+            # Instead of a fixed 15 scrolls, we scroll only until new content stops appearing
+            print("DEBUG: Executing smart scroll...")
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            
+            for i in range(8):  # Max 8 attempts to find new height
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(1.5)  # Wait for lazy-load images
                 
-            # If no growth for 3 consecutive scrolls, try aggressive triggers
-            if no_growth_count >= 3:
-                print("DEBUG: No growth detected, trying aggressive triggers...")
-                # Rapid scroll up/down to force lazy loading
-                for rapid_scroll in range(3):
-                    driver.execute_script("window.scrollTo(0, 0);")
-                    time.sleep(0.3)
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    # Try one tiny "nudge" scroll to be sure
+                    driver.execute_script("window.scrollBy(0, -200);")
                     time.sleep(0.5)
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    
+                    # If still no change, we are done
+                    if driver.execute_script("return document.body.scrollHeight") == last_height:
+                        break
                 
-                # Reset counter and continue
-                no_growth_count = 0
-                initial_height = driver.execute_script("return document.body.scrollHeight")
-        
-        # Strategy 2: Final comprehensive sweep
-        print("DEBUG: Final sweep for remaining images...")
-        # Multiple small scrolls to catch stubborn images
-        for final_scroll in range(5):
-            driver.execute_script(f"window.scrollTo(0, {document.body.scrollHeight * (0.8 + final_scroll * 0.04)});")
-            time.sleep(0.5)
-        
-        # Final wait for any remaining slow images
-        time.sleep(2)
-        print("DEBUG: Optimized scrolling completed")
+                last_height = new_height
+                print(f"DEBUG: Scroll {i+1} successful, height: {last_height}")
 
-        # 4. Extract
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        pages = extract_pages_from_soup(soup)
-        
-        if not pages:
-            pages = extract_pages_fallback(soup)
-        
-        print(f"DEBUG: Found {len(pages)} images")
-        _chapter_cache[chapter_id] = (pages, current_time)
-        return pages
+            # 4. Extraction
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            pages = extract_pages_from_soup(soup)
+            
+            if not pages:
+                pages = extract_pages_fallback(soup)
+            
+            print(f"DEBUG: Successfully found {len(pages)} images")
+            _chapter_cache[chapter_id] = (pages, current_time)
+            return pages
 
-    except Exception as e:
-        print(f"Deployment Error: {e}")
-        return []
-    finally:
-        driver.quit()
-
+        except Exception as e:
+            print(f"Scraping Error: {e}")
+            return []
+            
+        finally:
+            # Crucial: Always quit the driver to free up RAM
+            driver.quit()
+            print(f"DEBUG: Driver closed for: {chapter_id}")
 def extract_pages_from_soup(soup):
     """Extract pages from BeautifulSoup object - shared logic for both requests and Selenium"""
     print(f"DEBUG: Starting page extraction from HTML with {len(soup.select('img'))} total images")
