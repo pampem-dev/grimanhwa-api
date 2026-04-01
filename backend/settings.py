@@ -24,13 +24,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-$aivdzpie&sn@-dto1epe$titr7qcv5x$8#du@^9xxcam7v--v'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
-    'grimanhwa-api-production.up.railway.app',
+    '.railway.app',
+    '.up.railway.app',
     '127.0.0.1', 
     'localhost',
-    '10.7.6.206'
+    '10.7.6.206',
     '10.7.6.205'
 ]
 
