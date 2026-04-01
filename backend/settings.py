@@ -29,6 +29,7 @@ DEBUG = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = [
     '.railway.app',
     '.up.railway.app',
+    '.vercel.app',
     '127.0.0.1', 
     'localhost',
     '10.7.6.206',
