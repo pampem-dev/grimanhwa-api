@@ -799,7 +799,7 @@ def chapter_pages(chapter_id):
     current_time = time.time()
     if chapter_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[chapter_id]
-        if current_time - cached_time < 300:  # 5 minutes cache
+        if current_time - cached_time < _cache_timeout:
             print(f"Cache hit for chapter: {chapter_id}")
             return cached_data
 
@@ -814,7 +814,6 @@ def chapter_pages(chapter_id):
     
     if try_requests_first:
         try:
-            print(f"DEBUG: Trying requests method for: {chapter_id}")
             response = requests.get(chapter_id, timeout=15, headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -827,26 +826,20 @@ def chapter_pages(chapter_id):
                 soup = BeautifulSoup(response.content, 'html.parser')
                 pages = extract_pages_from_soup(soup)
                 if len(pages) > 0:  # If we found pages with requests, cache and return them
-                    print(f"DEBUG: Requests method found {len(pages)} pages")
                     _chapter_cache[chapter_id] = (pages, current_time)
                     return pages
                 else:
                     # Try fallback extraction with requests
                     pages = extract_pages_fallback(soup)
                     if len(pages) > 0:
-                        print(f"DEBUG: Requests fallback found {len(pages)} pages")
                         _chapter_cache[chapter_id] = (pages, current_time)
                         return pages
         except Exception as e:
-            print(f"DEBUG: Requests method failed: {e}")
+            print(f"Requests method failed: {e}")
 
     # Use Selenium with JavaScript enabled for AsuraScans
     print("DEBUG: Using Selenium with JavaScript enabled")
     options = Options()
-    
-    # Critical: Use Chromium binary installed by Nixpacks
-    options.binary_location = "/usr/bin/chromium"
-    
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
@@ -857,79 +850,35 @@ def chapter_pages(chapter_id):
     options.add_argument('--disable-web-security')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
-    # 3. Initialize Driver with better error handling
-    driver = None
-    try:
-        # Try using the system chromedriver first
-        service = Service(executable_path="/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=options)
-        print("DEBUG: Using system chromedriver")
-    except Exception as e1:
-        print(f"DEBUG: System chromedriver failed: {e1}")
-        try:
-            # Fallback to webdriver manager
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=options)
-            print("DEBUG: Using webdriver manager chromedriver")
-        except Exception as e2:
-            print(f"DEBUG: Webdriver manager failed: {e2}")
-            # Last resort - no service specified
-            try:
-                driver = webdriver.Chrome(options=options)
-                print("DEBUG: Using default chromedriver")
-            except Exception as e3:
-                print(f"DEBUG: All Selenium methods failed: {e3}")
-                return []
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        if driver:
-            driver.get(chapter_id)
-            time.sleep(3)  # Give more time for JavaScript to load
-            
-            # More aggressive scrolling for lazy loading
-            print("DEBUG: Starting aggressive lazy loading scroll...")
-            
-            # Get initial page height
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            
-            # Scroll multiple times to trigger all lazy loading
-            for scroll_attempt in range(5):  # Try 5 times
-                # Scroll to bottom
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)  # Wait for images to load
-                
-                # Check if new content loaded
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    print(f"DEBUG: No new content after scroll {scroll_attempt + 1}")
-                    break
-                last_height = new_height
-                print(f"DEBUG: Scroll {scroll_attempt + 1}, height: {new_height}")
-            
-            # Final scroll up and down to catch any remaining lazy images
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            pages = extract_pages_from_soup(soup)
-            
-            if not pages:
-                print("DEBUG: Primary extraction failed, trying fallback...")
-                pages = extract_pages_fallback(soup)
-            
-            print(f"DEBUG: Selenium found {len(pages)} pages")
-            _chapter_cache[chapter_id] = (pages, current_time)
-            return pages
+        driver.get(chapter_id)
+        time.sleep(2)  # Give more time for JavaScript to load
+        
+        # Scroll to trigger lazy loading
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(1)
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(1)
+        
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        pages = extract_pages_from_soup(soup)
+        
+        if not pages:
+            pages = extract_pages_fallback(soup)
+        
+        print(f"DEBUG: Selenium found {len(pages)} pages")
+        _chapter_cache[chapter_id] = (pages, current_time)
+        return pages
 
     except Exception as e:
-        print(f"Chapter pages failed: {str(e)}")
+        print(f"Chapter pages failed: {e}")
         return []
     finally:
-        # CRITICAL: Always quit to prevent Railway OOM (Out of Memory)
-        if driver:
-            driver.quit()
+        driver.quit()
 
 def extract_pages_from_soup(soup):
     """Extract pages from BeautifulSoup object - shared logic for both requests and Selenium"""
