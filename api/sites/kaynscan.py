@@ -774,13 +774,48 @@ def manga_info(manga_id):
                 if any(x in chapter_title.lower() for x in ['first chapter', 'latest chapter', 'next chapter', 'prev chapter']):
                     continue
 
+                # 3. DETECT LOCKED CHAPTERS
+                # Check for lock indicators in the chapter item or its parents
+                is_locked = False
+                
+                # Check for lock icons, lock text, or restricted class names
+                lock_indicators = [
+                    'lock', 'locked', 'premium', 'paid', 'restricted', 'member-only',
+                    'fa-lock', 'fas-lock', 'icon-lock', 'lock-icon'
+                ]
+                
+                # Check the item itself and its parents for lock indicators
+                current_element = item
+                for _ in range(3):  # Check item and up to 2 parents
+                    if current_element:
+                        # Check class names
+                        classes = current_element.get('class', [])
+                        if any(indicator in ' '.join(classes).lower() for indicator in lock_indicators):
+                            is_locked = True
+                            break
+                        
+                        # Check text content for lock indicators
+                        text_content = current_element.get_text().lower()
+                        if any(indicator in text_content for indicator in lock_indicators):
+                            is_locked = True
+                            break
+                        
+                        # Check for lock icons in the element
+                        lock_icons = current_element.select('i[class*="lock"], .lock, .locked, .fa-lock')
+                        if lock_icons:
+                            is_locked = True
+                            break
+                        
+                        current_element = current_element.parent
+                
                 chapter_num = extract_chapter_number(chapter_title, chapter_url)
                 
                 seen_urls.add(chapter_url)
                 chapters.append({
                     'id': chapter_url,
                     'title': chapter_title,
-                    'number': chapter_num
+                    'number': chapter_num,
+                    'is_locked': is_locked  # NEW: Add lock status
                 })
             
             # 3. Final Sort: Numeric descending ensures Ch 33 is at the top
