@@ -39,4 +39,4 @@ RUN python test_app.py
 EXPOSE 8000
 
 # Run Gunicorn with Railway-compatible settings
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "backend.wsgi"]
+CMD gunicorn --bind 0.0.0.0:$PORT

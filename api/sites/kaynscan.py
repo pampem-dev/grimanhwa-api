@@ -791,92 +791,53 @@ def manga_info(manga_id):
         print(f"Manga info failed: {e}")
         return []
 
+# Import your service
+from services import get_selenium_driver 
+
 def chapter_pages(chapter_id):
     if not chapter_id:
         return []
 
-    # Check cache first
+    # 1. Cache Check (Keep your existing cache logic here)
     current_time = time.time()
     if chapter_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[chapter_id]
         if current_time - cached_time < _cache_timeout:
-            print(f"Cache hit for chapter: {chapter_id}")
             return cached_data
 
-    # Try requests first but be more selective about when it works
-    pages = []
-    try_requests_first = True
+    # 2. Force Selenium for Asura
+    # We skip requests because it will 100% fail on a server IP
+    print(f"DEBUG: Using Stealth Selenium for: {chapter_id}")
     
-    # Force Selenium for AsuraScans since it needs JavaScript for all pages
-    if 'asurascans.com' in chapter_id.lower():
-        try_requests_first = False
-        print("DEBUG: Forcing Selenium for AsuraScans to get all pages")
-    
-    if try_requests_first:
-        try:
-            response = requests.get(chapter_id, timeout=15, headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1'
-            })
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                pages = extract_pages_from_soup(soup)
-                if len(pages) > 0:  # If we found pages with requests, cache and return them
-                    _chapter_cache[chapter_id] = (pages, current_time)
-                    return pages
-                else:
-                    # Try fallback extraction with requests
-                    pages = extract_pages_fallback(soup)
-                    if len(pages) > 0:
-                        _chapter_cache[chapter_id] = (pages, current_time)
-                        return pages
-        except Exception as e:
-            print(f"Requests method failed: {e}")
-
-    # Use Selenium with JavaScript enabled for AsuraScans
-    print("DEBUG: Using Selenium with JavaScript enabled")
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-dev-tools')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-images')  # Still disable images for speed
-    options.add_argument('--disable-web-security')
-    options.add_argument('--allow-running-insecure-content')
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-
-    driver = webdriver.Chrome(service=Service('/usr/bin/chromedriver'), options=options)
+    # USE YOUR SERVICE FUNCTION HERE
+    driver = get_selenium_driver() 
 
     try:
         driver.get(chapter_id)
-        time.sleep(2)  # Give more time for JavaScript to load
         
-        # Scroll to trigger lazy loading
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)
+        # Give Cloudflare 5 seconds to clear the challenge
+        time.sleep(5) 
         
+        # 3. Better Scrolling for Lazy Loading
+        # Some sites won't load images if you jump straight to the bottom
+        total_height = driver.execute_script("return document.body.scrollHeight")
+        for i in range(1, 5):
+            driver.execute_script(f"window.scrollTo(0, {total_height * (i/4)});")
+            time.sleep(0.7)
+
+        # 4. Extract
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         pages = extract_pages_from_soup(soup)
         
         if not pages:
             pages = extract_pages_fallback(soup)
         
-        print(f"DEBUG: Selenium found {len(pages)} pages")
+        print(f"DEBUG: Found {len(pages)} images")
         _chapter_cache[chapter_id] = (pages, current_time)
         return pages
 
     except Exception as e:
-        print(f"Chapter pages failed: {e}")
+        print(f"Deployment Error: {e}")
         return []
     finally:
         driver.quit()
