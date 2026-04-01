@@ -3,7 +3,9 @@ nixPkgs = ["python311", "gcc"]
 aptPkgs = ["chromium", "chromium-chromedriver", "libmariadb-dev", "libpq-dev"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+# Use 'python3 -m pip' to ensure it uses the correct environment
+cmds = ["python3 -m pip install -r requirements.txt"]
 
 [start]
-cmd = "python manage.py collectstatic --noinput && gunicorn backend.wsgi"
+# Ensure we use python3 here as well
+cmd = "python3 manage.py collectstatic --noinput && gunicorn backend.wsgi"
