@@ -818,47 +818,22 @@ def chapter_pages(chapter_id):
         # Give Cloudflare 5 seconds to clear the challenge
         time.sleep(5) 
         
-        # 3. AGGRESSIVE Scrolling for Lazy Loading
-        # Multiple strategies to ensure all images load
-        print("DEBUG: Starting aggressive scrolling for lazy loading...")
+        # 3. EFFICIENT Scrolling for Lazy Loading
+        # Back to basics - simple and effective
+        print("DEBUG: Starting efficient scrolling...")
         
-        # Strategy 1: Gradual scroll with waits
-        total_height = driver.execute_script("return document.body.scrollHeight")
-        last_height = 0
-        
-        # Keep scrolling until no new content loads
-        scroll_attempts = 0
-        max_scrolls = 10
-        
-        while scroll_attempts < max_scrolls:
-            # Scroll to bottom
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)  # Wait for images to start loading
-            
-            # Check if new content loaded
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                # No new content, try a few more times
-                scroll_attempts += 1
-                time.sleep(1)  # Extra wait for slow images
-            else:
-                # New content loaded, reset counter
-                scroll_attempts = 0
-                last_height = new_height
-                
-            print(f"DEBUG: Scroll attempt {scroll_attempts + 1}, height: {new_height}")
-        
-        # Strategy 2: Scroll back up and down to trigger lazy loading
-        print("DEBUG: Performing up-down scroll to trigger lazy loading...")
+        # Simple scroll strategy that was working before
         for i in range(3):
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
+            time.sleep(2)  # Wait for images to load
         
-        # Strategy 3: Final wait for any remaining images
-        print("DEBUG: Final wait for remaining images...")
-        time.sleep(3)
+        # Quick scroll to top and back down to trigger any remaining lazy loads
+        driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(1)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+        
+        print("DEBUG: Scrolling completed")
 
         # 4. Extract
         soup = BeautifulSoup(driver.page_source, 'html.parser')
