@@ -825,50 +825,68 @@ def chapter_pages(chapter_id):
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
 
-    # 3. Initialize Driver with static Service path
-    service = Service(executable_path="/usr/bin/chromedriver")
-    driver = webdriver.Chrome(service=service, options=options)
+    # 3. Initialize Driver with better error handling
+    driver = None
+    try:
+        # Try using the system chromedriver first
+        service = Service(executable_path="/usr/bin/chromedriver")
+        driver = webdriver.Chrome(service=service, options=options)
+        print("DEBUG: Using system chromedriver")
+    except Exception as e1:
+        print(f"DEBUG: System chromedriver failed: {e1}")
+        try:
+            # Fallback to webdriver manager
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+            print("DEBUG: Using webdriver manager chromedriver")
+        except Exception as e2:
+            print(f"DEBUG: Webdriver manager failed: {e2}")
+            # Last resort - no service specified
+            driver = webdriver.Chrome(options=options)
+            print("DEBUG: Using default chromedriver")
 
     try:
-        # 4. Apply JavaScript Stealth (Masks navigator.webdriver)
-        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        })
+        if driver:
+            # 4. Apply JavaScript Stealth (Masks navigator.webdriver)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            })
 
-        driver.get(chapter_id)
-        
-        # Wait for the initial "Cloudflare Challenge" to resolve
-        time.sleep(5) 
-        
-        # 5. Scroll to trigger Lazy Loading
-        # We scroll in increments so the site thinks a human is reading
-        total_height = driver.execute_script("return document.body.scrollHeight")
-        for i in range(1, 4):
-            driver.execute_script(f"window.scrollTo(0, {(total_height / 3) * i});")
-            time.sleep(1)
-        
-        # 6. Parse the page source
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        pages = extract_pages_from_soup(soup)
-        
-        if not pages:
-            print("DEBUG: Primary extraction failed, trying fallback...")
-            pages = extract_pages_fallback(soup)
-        
-        print(f"DEBUG: Selenium found {len(pages)} pages")
-        
-        # Cache results if we found images
-        if pages:
-            _chapter_cache[chapter_id] = (pages, current_time)
+            driver.get(chapter_id)
             
-        return pages
+            # Wait for the initial "Cloudflare Challenge" to resolve
+            time.sleep(3)  # Reduced from 5 to speed up
+            
+            # 5. Scroll to trigger Lazy Loading
+            # We scroll in increments so the site thinks a human is reading
+            total_height = driver.execute_script("return document.body.scrollHeight")
+            for i in range(1, 3):  # Reduced from 4 to 3 scrolls
+                driver.execute_script(f"window.scrollTo(0, {(total_height / 3) * i});")
+                time.sleep(0.5)  # Reduced sleep time
+            
+            # 6. Parse the page source
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            pages = extract_pages_from_soup(soup)
+            
+            if not pages:
+                print("DEBUG: Primary extraction failed, trying fallback...")
+                pages = extract_pages_fallback(soup)
+            
+            print(f"DEBUG: Selenium found {len(pages)} pages")
+            
+            # Cache results if we found images
+            if pages:
+                _chapter_cache[chapter_id] = (pages, current_time)
+                
+            return pages
 
     except Exception as e:
         print(f"Chapter pages failed: {str(e)}")
         return []
     finally:
         # 7. CRITICAL: Always quit to prevent Railway OOM (Out of Memory)
-        driver.quit()
+        if driver:
+            driver.quit()
 
 def extract_pages_from_soup(soup):
     """Extract pages from BeautifulSoup object - shared logic for both requests and Selenium"""
