@@ -1,2 +1,5 @@
 [phases.setup]
-nixPkgs = ["python3", "google-chrome", "chromedriver"]
+nixPkgs = ["google-chrome", "chromedriver"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt"]
