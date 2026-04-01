@@ -815,25 +815,56 @@ def chapter_pages(chapter_id):
     try:
         driver.get(chapter_id)
         
-        # Give Cloudflare 5 seconds to clear the challenge
-        time.sleep(5) 
+        # Give Cloudflare 3 seconds to clear the challenge
+        time.sleep(3) 
         
-        # 3. EFFICIENT Scrolling for Lazy Loading
-        # Back to basics - simple and effective
-        print("DEBUG: Starting efficient scrolling...")
+        # 3. OPTIMIZED Scrolling for Large Chapters
+        # Smart scrolling that prioritizes speed and completeness
+        print("DEBUG: Starting optimized scrolling for large chapter...")
         
-        # Simple scroll strategy that was working before
-        for i in range(3):
+        # Strategy 1: Quick height detection and smart scrolling
+        initial_height = driver.execute_script("return document.body.scrollHeight")
+        max_scrolls = 15  # More scrolls for large chapters
+        no_growth_count = 0
+        
+        for scroll_num in range(max_scrolls):
+            # Scroll to bottom
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)  # Wait for images to load
+            time.sleep(1)  # Shorter wait for faster processing
+            
+            # Check if new content loaded
+            current_height = driver.execute_script("return document.body.scrollHeight")
+            if current_height > initial_height:
+                initial_height = current_height
+                no_growth_count = 0
+                print(f"DEBUG: New content found at scroll {scroll_num + 1}, height: {current_height}")
+            else:
+                no_growth_count += 1
+                
+            # If no growth for 3 consecutive scrolls, try aggressive triggers
+            if no_growth_count >= 3:
+                print("DEBUG: No growth detected, trying aggressive triggers...")
+                # Rapid scroll up/down to force lazy loading
+                for rapid_scroll in range(3):
+                    driver.execute_script("window.scrollTo(0, 0);")
+                    time.sleep(0.3)
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(0.5)
+                
+                # Reset counter and continue
+                no_growth_count = 0
+                initial_height = driver.execute_script("return document.body.scrollHeight")
         
-        # Quick scroll to top and back down to trigger any remaining lazy loads
-        driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(1)
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        # Strategy 2: Final comprehensive sweep
+        print("DEBUG: Final sweep for remaining images...")
+        # Multiple small scrolls to catch stubborn images
+        for final_scroll in range(5):
+            driver.execute_script(f"window.scrollTo(0, {document.body.scrollHeight * (0.8 + final_scroll * 0.04)});")
+            time.sleep(0.5)
+        
+        # Final wait for any remaining slow images
         time.sleep(2)
-        
-        print("DEBUG: Scrolling completed")
+        print("DEBUG: Optimized scrolling completed")
 
         # 4. Extract
         soup = BeautifulSoup(driver.page_source, 'html.parser')
