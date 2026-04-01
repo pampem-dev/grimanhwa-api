@@ -884,15 +884,33 @@ def chapter_pages(chapter_id):
     try:
         if driver:
             driver.get(chapter_id)
-            time.sleep(2)  # Give more time for JavaScript to load
+            time.sleep(3)  # Give more time for JavaScript to load
             
-            # Scroll to trigger lazy loading
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
+            # More aggressive scrolling for lazy loading
+            print("DEBUG: Starting aggressive lazy loading scroll...")
+            
+            # Get initial page height
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            
+            # Scroll multiple times to trigger all lazy loading
+            for scroll_attempt in range(5):  # Try 5 times
+                # Scroll to bottom
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)  # Wait for images to load
+                
+                # Check if new content loaded
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                if new_height == last_height:
+                    print(f"DEBUG: No new content after scroll {scroll_attempt + 1}")
+                    break
+                last_height = new_height
+                print(f"DEBUG: Scroll {scroll_attempt + 1}, height: {new_height}")
+            
+            # Final scroll up and down to catch any remaining lazy images
             driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
+            time.sleep(2)
             
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             pages = extract_pages_from_soup(soup)
