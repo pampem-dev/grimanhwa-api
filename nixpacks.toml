@@ -1,6 +1,6 @@
 [phases.setup]
 nixPkgs = ["python311", "gcc"]
-aptPkgs = ["google-chrome-stable", "chromium-chromedriver"]
+aptPkgs = ["google-chrome-stable", "chromium-chromedriver", "libmariadb-dev", "libpq-dev"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
