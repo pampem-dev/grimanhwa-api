@@ -1,5 +1,6 @@
 [phases.setup]
-nixPkgs = ["python311", "google-chrome", "chromedriver"]
+nixPkgs = ["python311", "gcc"]
+aptPkgs = ["google-chrome-stable", "chromium-chromedriver"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
