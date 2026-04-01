@@ -795,18 +795,48 @@ def chapter_pages(chapter_id):
     if not chapter_id:
         return []
 
-    # 1. Check cache first
+    # Check cache first
     current_time = time.time()
     if chapter_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[chapter_id]
-        if current_time - cached_time < _cache_timeout:
+        if current_time - cached_time < 300:  # 5 minutes cache
             print(f"Cache hit for chapter: {chapter_id}")
             return cached_data
 
     pages = []
     
+    # Try requests first as a fallback when Selenium fails
+    try:
+        print(f"DEBUG: Trying requests method for: {chapter_id}")
+        response = requests.get(chapter_id, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            pages = extract_pages_from_soup(soup)
+            if len(pages) > 0:
+                print(f"DEBUG: Requests method found {len(pages)} pages")
+                _chapter_cache[chapter_id] = (pages, current_time)
+                return pages
+            else:
+                # Try fallback extraction with requests
+                pages = extract_pages_fallback(soup)
+                if len(pages) > 0:
+                    print(f"DEBUG: Requests fallback found {len(pages)} pages")
+                    _chapter_cache[chapter_id] = (pages, current_time)
+                    return pages
+    except Exception as e:
+        print(f"DEBUG: Requests method failed: {e}")
+
+    # If requests failed, try Selenium as last resort
+    print(f"DEBUG: Requests failed, trying Selenium for: {chapter_id}")
+    
     # 2. Setup Selenium Options for Railway/Linux
-    print(f"DEBUG: Starting Selenium for: {chapter_id}")
     options = Options()
     
     # Critical: Use Chromium binary installed by Nixpacks
@@ -817,6 +847,9 @@ def chapter_pages(chapter_id):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
     options.add_argument('--disable-dev-tools')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-web-security')
+    options.add_argument('--allow-running-insecure-content')
     
     # Identity: Real User-Agent to bypass 503
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
@@ -842,8 +875,12 @@ def chapter_pages(chapter_id):
         except Exception as e2:
             print(f"DEBUG: Webdriver manager failed: {e2}")
             # Last resort - no service specified
-            driver = webdriver.Chrome(options=options)
-            print("DEBUG: Using default chromedriver")
+            try:
+                driver = webdriver.Chrome(options=options)
+                print("DEBUG: Using default chromedriver")
+            except Exception as e3:
+                print(f"DEBUG: All Selenium methods failed: {e3}")
+                return []
 
     try:
         if driver:
