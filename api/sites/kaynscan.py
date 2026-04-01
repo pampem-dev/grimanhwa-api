@@ -818,12 +818,47 @@ def chapter_pages(chapter_id):
         # Give Cloudflare 5 seconds to clear the challenge
         time.sleep(5) 
         
-        # 3. Better Scrolling for Lazy Loading
-        # Some sites won't load images if you jump straight to the bottom
+        # 3. AGGRESSIVE Scrolling for Lazy Loading
+        # Multiple strategies to ensure all images load
+        print("DEBUG: Starting aggressive scrolling for lazy loading...")
+        
+        # Strategy 1: Gradual scroll with waits
         total_height = driver.execute_script("return document.body.scrollHeight")
-        for i in range(1, 5):
-            driver.execute_script(f"window.scrollTo(0, {total_height * (i/4)});")
-            time.sleep(0.7)
+        last_height = 0
+        
+        # Keep scrolling until no new content loads
+        scroll_attempts = 0
+        max_scrolls = 10
+        
+        while scroll_attempts < max_scrolls:
+            # Scroll to bottom
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)  # Wait for images to start loading
+            
+            # Check if new content loaded
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                # No new content, try a few more times
+                scroll_attempts += 1
+                time.sleep(1)  # Extra wait for slow images
+            else:
+                # New content loaded, reset counter
+                scroll_attempts = 0
+                last_height = new_height
+                
+            print(f"DEBUG: Scroll attempt {scroll_attempts + 1}, height: {new_height}")
+        
+        # Strategy 2: Scroll back up and down to trigger lazy loading
+        print("DEBUG: Performing up-down scroll to trigger lazy loading...")
+        for i in range(3):
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(2)
+        
+        # Strategy 3: Final wait for any remaining images
+        print("DEBUG: Final wait for remaining images...")
+        time.sleep(3)
 
         # 4. Extract
         soup = BeautifulSoup(driver.page_source, 'html.parser')
