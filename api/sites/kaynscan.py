@@ -840,7 +840,7 @@ def chapter_pages(chapter_id):
     # Use Selenium with JavaScript enabled for AsuraScans
     print("DEBUG: Using Selenium with JavaScript enabled")
     options = Options()
-    options.add_argument('--headless=new')
+    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
@@ -848,9 +848,10 @@ def chapter_pages(chapter_id):
     options.add_argument('--disable-extensions')
     options.add_argument('--disable-images')  # Still disable images for speed
     options.add_argument('--disable-web-security')
+    options.add_argument('--allow-running-insecure-content')
     options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver = webdriver.Chrome(service=Service('/usr/bin/chromedriver'), options=options)
 
     try:
         driver.get(chapter_id)
