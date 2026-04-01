@@ -25,14 +25,18 @@ RUN pip install -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Set environment variables for Selenium
+# Set environment variables for Selenium and Railway
 ENV PATH="/usr/bin/chromedriver:${PATH}"
+ENV PORT=8000
 
 # Collect static files
 RUN python manage.py collectstatic --noinput
 
-# Expose port
+# Test if application can start correctly
+RUN python test_app.py
+
+# Expose port (Railway uses port 8000 by default)
 EXPOSE 8000
 
-# Run Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "backend.wsgi"]
+# Run Gunicorn with Railway-compatible settings
+CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "backend.wsgi"]
