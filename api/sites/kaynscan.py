@@ -803,40 +803,45 @@ def chapter_pages(chapter_id):
             print(f"Cache hit for chapter: {chapter_id}")
             return cached_data
 
+    # Try requests first but be more selective about when it works
     pages = []
+    try_requests_first = True
     
-    # Try requests first as a fallback when Selenium fails
-    try:
-        print(f"DEBUG: Trying requests method for: {chapter_id}")
-        response = requests.get(chapter_id, timeout=15, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.content, 'html.parser')
-            pages = extract_pages_from_soup(soup)
-            if len(pages) > 0:
-                print(f"DEBUG: Requests method found {len(pages)} pages")
-                _chapter_cache[chapter_id] = (pages, current_time)
-                return pages
-            else:
-                # Try fallback extraction with requests
-                pages = extract_pages_fallback(soup)
-                if len(pages) > 0:
-                    print(f"DEBUG: Requests fallback found {len(pages)} pages")
+    # Force Selenium for AsuraScans since it needs JavaScript for all pages
+    if 'asurascans.com' in chapter_id.lower():
+        try_requests_first = False
+        print("DEBUG: Forcing Selenium for AsuraScans to get all pages")
+    
+    if try_requests_first:
+        try:
+            print(f"DEBUG: Trying requests method for: {chapter_id}")
+            response = requests.get(chapter_id, timeout=15, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            })
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                pages = extract_pages_from_soup(soup)
+                if len(pages) > 0:  # If we found pages with requests, cache and return them
+                    print(f"DEBUG: Requests method found {len(pages)} pages")
                     _chapter_cache[chapter_id] = (pages, current_time)
                     return pages
-    except Exception as e:
-        print(f"DEBUG: Requests method failed: {e}")
+                else:
+                    # Try fallback extraction with requests
+                    pages = extract_pages_fallback(soup)
+                    if len(pages) > 0:
+                        print(f"DEBUG: Requests fallback found {len(pages)} pages")
+                        _chapter_cache[chapter_id] = (pages, current_time)
+                        return pages
+        except Exception as e:
+            print(f"DEBUG: Requests method failed: {e}")
 
-    # If requests failed, try Selenium as last resort
-    print(f"DEBUG: Requests failed, trying Selenium for: {chapter_id}")
-    
-    # 2. Setup Selenium Options for Railway/Linux
+    # Use Selenium with JavaScript enabled for AsuraScans
+    print("DEBUG: Using Selenium with JavaScript enabled")
     options = Options()
     
     # Critical: Use Chromium binary installed by Nixpacks
@@ -848,15 +853,9 @@ def chapter_pages(chapter_id):
     options.add_argument('--disable-gpu')
     options.add_argument('--disable-dev-tools')
     options.add_argument('--disable-extensions')
+    options.add_argument('--disable-images')  # Still disable images for speed
     options.add_argument('--disable-web-security')
-    options.add_argument('--allow-running-insecure-content')
-    
-    # Identity: Real User-Agent to bypass 503
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-
-    # Stealth: Remove automation fingerprints
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
     # 3. Initialize Driver with better error handling
     driver = None
@@ -884,24 +883,17 @@ def chapter_pages(chapter_id):
 
     try:
         if driver:
-            # 4. Apply JavaScript Stealth (Masks navigator.webdriver)
-            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            })
-
             driver.get(chapter_id)
+            time.sleep(2)  # Give more time for JavaScript to load
             
-            # Wait for the initial "Cloudflare Challenge" to resolve
-            time.sleep(3)  # Reduced from 5 to speed up
+            # Scroll to trigger lazy loading
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
             
-            # 5. Scroll to trigger Lazy Loading
-            # We scroll in increments so the site thinks a human is reading
-            total_height = driver.execute_script("return document.body.scrollHeight")
-            for i in range(1, 3):  # Reduced from 4 to 3 scrolls
-                driver.execute_script(f"window.scrollTo(0, {(total_height / 3) * i});")
-                time.sleep(0.5)  # Reduced sleep time
-            
-            # 6. Parse the page source
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             pages = extract_pages_from_soup(soup)
             
@@ -910,18 +902,14 @@ def chapter_pages(chapter_id):
                 pages = extract_pages_fallback(soup)
             
             print(f"DEBUG: Selenium found {len(pages)} pages")
-            
-            # Cache results if we found images
-            if pages:
-                _chapter_cache[chapter_id] = (pages, current_time)
-                
+            _chapter_cache[chapter_id] = (pages, current_time)
             return pages
 
     except Exception as e:
         print(f"Chapter pages failed: {str(e)}")
         return []
     finally:
-        # 7. CRITICAL: Always quit to prevent Railway OOM (Out of Memory)
+        # CRITICAL: Always quit to prevent Railway OOM (Out of Memory)
         if driver:
             driver.quit()
 
