@@ -3,7 +3,8 @@ nixPkgs = ["(python311.withPackages (ps: with ps; [ pip ]))", "gcc"]
 aptPkgs = ["chromium", "chromium-chromedriver", "libmariadb-dev", "libpq-dev"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["python3 -m pip install -r requirements.txt"]
 
 [start]
-cmd = "python3 manage.py collectstatic --noinput && gunicorn backend.wsgi"
+# We call gunicorn as a module here to avoid the 'command not found' error
+cmd = "python3 manage.py collectstatic --noinput && python3 -m gunicorn backend.wsgi"
