@@ -16,6 +16,9 @@ import threading
 _chapter_cache = {}
 _cache_timeout = 3600  # 1 hour cache timeout
 
+# Track when we've reached the end of available chapters
+_empty_chapters_found = set()  # Store manga URLs that have reached end
+
 # Cache for search results (home page)
 _search_cache = {}
 _search_cache_timeout = 1800  # 30 minutes for search
@@ -153,7 +156,7 @@ def extract_manga_data_from_item(item, base_url):
     return None
 
 def get_all_browse_manga():
-    """Get all manga from all browse pages (1-17) - OPTIMIZED"""
+    """Get all manga from all browse pages - OPTIMIZED"""
     # Check cache first
     cache_key = "all_browse_manga"
     current_time = time.time()
@@ -166,7 +169,7 @@ def get_all_browse_manga():
     
     print("Cache miss - scraping all browse pages...")
     all_manga = []
-    base_url = "https://asurascans.com"
+    base_url = "https://asurascans.com"  # Using asurascans.com as it's the working site
     
     try:
         # Use concurrent requests to speed up scraping
@@ -200,8 +203,8 @@ def get_all_browse_manga():
                 return page_num, []
         
         # Scrape pages concurrently (max 5 at a time to be respectful)
-        max_pages = 17
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        max_pages = 10  # Reduced to avoid overwhelming the server
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:  # Reduced workers
             future_to_page = {executor.submit(scrape_page, page): page for page in range(1, max_pages + 1)}
             
             for future in concurrent.futures.as_completed(future_to_page):
@@ -732,81 +735,89 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
     return manga_list
 
 def manga_info(manga_id):
-    """Get chapter list for a specific manga"""
+    """Get manga info and chapters from AsuraScans - OPTIMIZED"""
     if not manga_id:
         return []
     
+    current_time = time.time()
+    
+    # Check cache first
+    if manga_id in _chapter_cache:
+        cached_data, cached_time = _chapter_cache[manga_id]
+        if current_time - cached_time < _cache_timeout:
+            print(f"DEBUG: Using cached chapters for {manga_id}")
+            return cached_data
+    
+    print(f"DEBUG: Fetching chapters for {manga_id}")
+    
     try:
-        response = requests.get(manga_id, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        # OPTIMIZED: Use requests instead of Selenium for chapter list
+        response = requests.get(manga_id, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         })
+        
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, 'html.parser')
             chapters = []
-            seen_urls = set() # To prevent the duplicate Chapter 1 / Chapter 33
+            seen_urls = set() # To prevent duplicates
             
-            # Target the specific list container if possible, 
-            # otherwise filter the items globally
-            chapter_items = soup.select('a[href*="/chapter/"]')
+            # OPTIMIZED: Target specific chapter list selectors first
+            chapter_selectors = [
+                'ul.chapter-list a',  # Most common
+                'div.chapter-list a',
+                'div.wp-block-group a[href*="/chapter/"]',
+                'div.entry-content a[href*="/chapter/"]',
+                'main a[href*="/chapter/"]',
+                'article a[href*="/chapter/"]',
+                'div.post-content a[href*="/chapter/"]',
+                'div.content a[href*="/chapter/"]'
+            ]
             
+            chapter_items = []
+            for selector in chapter_selectors:
+                items = soup.select(selector)
+                if items:
+                    chapter_items = items
+                    print(f"DEBUG: Found {len(items)} chapters with selector: {selector}")
+                    break
+            
+            # Fallback to global search if specific selectors don't work
+            if not chapter_items:
+                chapter_items = soup.select('a[href*="/chapter/"]')
+                print(f"DEBUG: Using global search, found {len(chapter_items)} chapters")
+            
+            # Process chapters with minimal processing
             for item in chapter_items:
                 chapter_url = item.get('href')
-                chapter_title = ''.join(item.find_all(text=True, recursive=False)).strip()
                 
-                if not chapter_title:
-                    chapter_title = item.get_text(" ", strip=True).split('\n')[0]
-                
-                if not chapter_url:
-                    continue
-
-                # Normalize the URL
-                if not chapter_url.startswith('http'):
-                    chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
-
-                # --- THE FIXES ---
-                
-                # 1. Skip if we've already added this URL (Stops duplicate Ch 1 and Ch 33)
-                if chapter_url in seen_urls:
+                if not chapter_url or chapter_url in seen_urls:
                     continue
                 
-                # 2. Skip the 'First Chapter' and 'Latest Chapter' buttons
-                # These are usually just navigation helpers, not the list items
+                # Quick title extraction
+                chapter_title = item.get_text(strip=True).split('\n')[0].strip()
+                if not chapter_title or len(chapter_title) < 3:
+                    continue
+                
+                # Skip navigation buttons
                 if any(x in chapter_title.lower() for x in ['first chapter', 'latest chapter', 'next chapter', 'prev chapter']):
                     continue
-
-                # 3. DETECT LOCKED CHAPTERS
-                # Check for lock indicators in the chapter item or its parents
-                is_locked = False
                 
-                # Check for lock icons, lock text, or restricted class names
-                lock_indicators = [
-                    'lock', 'locked', 'premium', 'paid', 'restricted', 'member-only',
-                    'fa-lock', 'fas-lock', 'icon-lock', 'lock-icon'
-                ]
+                # Normalize URL
+                if not chapter_url.startswith('http'):
+                    chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
                 
-                # Check the item itself and its parents for lock indicators
-                current_element = item
-                for _ in range(3):  # Check item and up to 2 parents
-                    if current_element:
-                        # Check class names
-                        classes = current_element.get('class', [])
-                        if any(indicator in ' '.join(classes).lower() for indicator in lock_indicators):
-                            is_locked = True
-                            break
-                        
-                        # Check text content for lock indicators
-                        text_content = current_element.get_text().lower()
-                        if any(indicator in text_content for indicator in lock_indicators):
-                            is_locked = True
-                            break
-                        
-                        # Check for lock icons in the element
-                        lock_icons = current_element.select('i[class*="lock"], .lock, .locked, .fa-lock')
-                        if lock_icons:
-                            is_locked = True
-                            break
-                        
-                        current_element = current_element.parent
+                # Quick lock detection (minimal)
+                is_locked = any(
+                    indicator in item.get('class', []) or 
+                    indicator in chapter_title.lower() or
+                    item.select('i[class*="lock"], .lock, .locked')
+                    for indicator in ['lock', 'locked', 'premium', 'paid']
+                )
                 
                 chapter_num = extract_chapter_number(chapter_title, chapter_url)
                 
@@ -815,19 +826,30 @@ def manga_info(manga_id):
                     'id': chapter_url,
                     'title': chapter_title,
                     'number': chapter_num,
-                    'is_locked': is_locked  # NEW: Add lock status
+                    'is_locked': is_locked
                 })
+                
+                # Stop after 100 chapters to prevent excessive processing
+                if len(chapters) >= 100:
+                    print(f"DEBUG: Stopping at {len(chapters)} chapters to prevent timeout")
+                    break
             
-            # 3. Final Sort: Numeric descending ensures Ch 33 is at the top
+            # Sort by chapter number (descending)
             chapters.sort(key=lambda x: x['number'], reverse=True)
+            
+            print(f"DEBUG: Processed {len(chapters)} chapters")
+            _chapter_cache[manga_id] = (chapters, current_time)
             return chapters
-
-        return []
+            
+        else:
+            print(f"Failed to fetch manga info: {response.status_code}")
+            return []
             
     except Exception as e:
         print(f"Manga info failed: {e}")
         return []
 
+# ... (rest of the code remains the same)
 
 # --- NEW: GLOBAL LOCK ---
 # This prevents multiple requests from spawning multiple Chrome instances
@@ -836,6 +858,16 @@ selenium_lock = threading.Lock()
 
 def chapter_pages(chapter_id):
     if not chapter_id:
+        return []
+
+    # Extract the base manga URL to track empty chapters
+    import urllib.parse
+    parsed = urllib.parse.urlparse(chapter_id)
+    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/chapter/', 1)[0]}"
+    
+    # Check if this manga has already reached the end
+    if base_url in _empty_chapters_found:
+        print(f"DEBUG: Skipping {chapter_id} - manga {base_url} already reached end")
         return []
 
     # 1. Cache Check (Outside the lock for speed)
@@ -889,6 +921,12 @@ def chapter_pages(chapter_id):
                 pages = extract_pages_fallback(soup)
             
             print(f"DEBUG: Successfully found {len(pages)} images")
+            
+            # If no pages found, mark this manga as having reached the end
+            if len(pages) == 0:
+                print(f"DEBUG: Marking manga {base_url} as reached end (0 pages found)")
+                _empty_chapters_found.add(base_url)
+            
             _chapter_cache[chapter_id] = (pages, current_time)
             return pages
 

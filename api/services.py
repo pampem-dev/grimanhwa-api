@@ -1,13 +1,33 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+import os
 
 def get_selenium_driver():
     options = Options()
     
     # 1. PATH CORRECTION: 
-    # In Ubuntu Noble (Railway), the binary is usually at /usr/bin/chromium
-    options.binary_location = "/usr/bin/chromium"
+    # Try multiple possible Chrome/Chromium locations
+    chrome_paths = [
+        "/usr/bin/chromium",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chrome",
+        "/snap/bin/chromium",
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",  # Windows
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"  # Windows x86
+    ]
+    
+    chrome_binary = None
+    for path in chrome_paths:
+        if os.path.exists(path):
+            chrome_binary = path
+            break
+    
+    if chrome_binary:
+        options.binary_location = chrome_binary
+        print(f"Using Chrome binary: {chrome_binary}")
+    else:
+        print("Chrome binary not found, using default")
     
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -23,13 +43,41 @@ def get_selenium_driver():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
 
-    service = Service("/usr/bin/chromedriver")
-    driver = webdriver.Chrome(service=service, options=options)
-
-    # 4. JAVASCRIPT STEALTH: 
-    # This prevents the website from detecting Selenium's 'webdriver' property.
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
+    # 4. FLEXIBLE DRIVER SETUP:
+    # Try to find chromedriver automatically, or use specific paths
+    driver_paths = [
+        "/usr/bin/chromedriver",
+        "/usr/local/bin/chromedriver",
+        "/snap/bin/chromedriver.chromedriver",
+        "chromedriver",  # Let selenium find it in PATH
+    ]
     
-    return driver
+    service = None
+    for path in driver_paths:
+        try:
+            if path == "chromedriver":
+                # Let selenium find it automatically
+                service = Service()
+            elif os.path.exists(path):
+                service = Service(path)
+                print(f"Using ChromeDriver: {path}")
+                break
+        except:
+            continue
+    
+    if service is None:
+        service = Service()  # Fallback to auto-detection
+    
+    try:
+        driver = webdriver.Chrome(service=service, options=options)
+        
+        # 4. JAVASCRIPT STEALTH: 
+        # This prevents the website from detecting Selenium's 'webdriver' property.
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        })
+        
+        return driver
+    except Exception as e:
+        print(f"Failed to create Chrome driver: {e}")
+        raise e
