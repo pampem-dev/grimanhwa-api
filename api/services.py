@@ -13,6 +13,9 @@ def get_selenium_driver():
         "/usr/bin/google-chrome",
         "/usr/bin/chrome",
         "/snap/bin/chromium",
+        "/usr/bin/chromium-browser",
+        "/opt/google/chrome/chrome",
+        "/usr/local/bin/chrome",
         "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",  # Windows
         "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"  # Windows x86
     ]
