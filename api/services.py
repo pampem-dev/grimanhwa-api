@@ -50,6 +50,7 @@ def get_selenium_driver():
     # Try to find chromedriver automatically, or use specific paths
     driver_paths = [
         "/usr/bin/chromedriver",
+        "/usr/bin/chromium-driver",  # Debian/Ubuntu package name
         "/usr/local/bin/chromedriver",
         "/snap/bin/chromedriver.chromedriver",
         "chromedriver",  # Let selenium find it in PATH
