@@ -203,7 +203,7 @@ def get_all_browse_manga():
                 return page_num, []
         
         # Scrape pages concurrently (max 5 at a time to be respectful)
-        max_pages = 10  # Reduced to avoid overwhelming the server
+        max_pages = 17  # Reduced to avoid overwhelming the server
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:  # Reduced workers
             future_to_page = {executor.submit(scrape_page, page): page for page in range(1, max_pages + 1)}
             
