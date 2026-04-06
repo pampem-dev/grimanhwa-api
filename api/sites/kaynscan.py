@@ -1033,7 +1033,7 @@ def extract_pages_from_soup(soup):
     print(f"DEBUG: Initial extraction found {len(pages)} pages")
 
     # If still not enough pages, try very aggressive search
-    if len(pages) < 10:  # Lower threshold
+    if len(pages) < 17:
         print("DEBUG: Trying aggressive search for more pages...")
         # Look for ALL images in entire document
         for img in soup.select('img'):
