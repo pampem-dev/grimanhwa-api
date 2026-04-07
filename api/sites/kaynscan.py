@@ -19,6 +19,13 @@ _cache_timeout = 3600  # 1 hour cache timeout
 # Track when we've reached the end of available chapters
 _empty_chapters_found = set()  # Store manga URLs that have reached end
 
+def clear_chapter_cache():
+    """Clear the chapter cache and end-of-chapter tracking"""
+    global _chapter_cache, _empty_chapters_found
+    _chapter_cache.clear()
+    _empty_chapters_found.clear()
+    print("Chapter cache and end-of-chapter tracking cleared!")
+
 # Cache for search results (home page)
 _search_cache = {}
 _search_cache_timeout = 1800  # 30 minutes for search
@@ -734,21 +741,29 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
     
     return manga_list
 
-def manga_info(manga_id):
-    """Get manga info and chapters from AsuraScans - OPTIMIZED"""
+def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
+    """Get manga info and chapters from AsuraScans - BATCH LOADING"""
     if not manga_id:
         return []
     
     current_time = time.time()
     
-    # Check cache first
-    if manga_id in _chapter_cache:
+    # Check cache first (unless force refresh)
+    if not force_refresh and manga_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[manga_id]
         if current_time - cached_time < _cache_timeout:
             print(f"DEBUG: Using cached chapters for {manga_id}")
             return cached_data
     
-    print(f"DEBUG: Fetching chapters for {manga_id}")
+    # Clear cache for this manga if force refresh
+    if force_refresh and manga_id in _chapter_cache:
+        del _chapter_cache[manga_id]
+        print(f"DEBUG: Cleared cache for {manga_id}")
+    
+    print(f"DEBUG: Fetching chapters for {manga_id} (batch size: {batch_size})")
+    
+    all_chapters = []
+    seen_urls = set()
     
     try:
         # OPTIMIZED: Use requests instead of Selenium for chapter list
@@ -763,8 +778,6 @@ def manga_info(manga_id):
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, 'html.parser')
-            chapters = []
-            seen_urls = set() # To prevent duplicates
             
             # OPTIMIZED: Target specific chapter list selectors first
             chapter_selectors = [
@@ -783,7 +796,7 @@ def manga_info(manga_id):
                 items = soup.select(selector)
                 if items:
                     chapter_items = items
-                    print(f"DEBUG: Found {len(items)} chapters with selector: {selector}")
+                    print(f"DEBUG: Found {len(items)} total chapters with selector: {selector}")
                     break
             
             # Fallback to global search if specific selectors don't work
@@ -791,55 +804,75 @@ def manga_info(manga_id):
                 chapter_items = soup.select('a[href*="/chapter/"]')
                 print(f"DEBUG: Using global search, found {len(chapter_items)} chapters")
             
-            # Process chapters with minimal processing
-            for item in chapter_items:
-                chapter_url = item.get('href')
+            # Process chapters in batches
+            total_items = len(chapter_items)
+            print(f"DEBUG: Processing {total_items} chapters in batches of {batch_size}")
+            
+            for batch_num in range(max_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, total_items)
                 
-                if not chapter_url or chapter_url in seen_urls:
-                    continue
-                
-                # Quick title extraction
-                chapter_title = item.get_text(strip=True).split('\n')[0].strip()
-                if not chapter_title or len(chapter_title) < 3:
-                    continue
-                
-                # Skip navigation buttons
-                if any(x in chapter_title.lower() for x in ['first chapter', 'latest chapter', 'next chapter', 'prev chapter']):
-                    continue
-                
-                # Normalize URL
-                if not chapter_url.startswith('http'):
-                    chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
-                
-                # Quick lock detection (minimal)
-                is_locked = any(
-                    indicator in item.get('class', []) or 
-                    indicator in chapter_title.lower() or
-                    item.select('i[class*="lock"], .lock, .locked')
-                    for indicator in ['lock', 'locked', 'premium', 'paid']
-                )
-                
-                chapter_num = extract_chapter_number(chapter_title, chapter_url)
-                
-                seen_urls.add(chapter_url)
-                chapters.append({
-                    'id': chapter_url,
-                    'title': chapter_title,
-                    'number': chapter_num,
-                    'is_locked': is_locked
-                })
-                
-                # Stop after 100 chapters to prevent excessive processing
-                if len(chapters) >= 100:
-                    print(f"DEBUG: Stopping at {len(chapters)} chapters to prevent timeout")
+                if start_idx >= total_items:
+                    print(f"DEBUG: All {len(all_chapters)} chapters processed")
                     break
+                
+                print(f"DEBUG: Processing batch {batch_num + 1}: chapters {start_idx + 1}-{end_idx}")
+                
+                # Process current batch
+                batch_items = chapter_items[start_idx:end_idx]
+                batch_chapters = []
+                
+                for item in batch_items:
+                    chapter_url = item.get('href')
+                    
+                    if not chapter_url or chapter_url in seen_urls:
+                        continue
+                    
+                    # Quick title extraction
+                    chapter_title = item.get_text(strip=True).split('\n')[0].strip()
+                    if not chapter_title or len(chapter_title) < 3:
+                        continue
+                    
+                    # Skip navigation buttons
+                    if any(x in chapter_title.lower() for x in ['first chapter', 'latest chapter', 'next chapter', 'prev chapter']):
+                        continue
+                    
+                    # Normalize URL
+                    if not chapter_url.startswith('http'):
+                        chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
+                    
+                    # Quick lock detection (minimal)
+                    is_locked = any(
+                        indicator in item.get('class', []) or 
+                        indicator in chapter_title.lower() or
+                        item.select('i[class*="lock"], .lock, .locked')
+                        for indicator in ['lock', 'locked', 'premium', 'paid']
+                    )
+                    
+                    chapter_num = extract_chapter_number(chapter_title, chapter_url)
+                    
+                    seen_urls.add(chapter_url)
+                    chapter_data = {
+                        'id': chapter_url,
+                        'title': chapter_title,
+                        'number': chapter_num,
+                        'is_locked': is_locked
+                    }
+                    batch_chapters.append(chapter_data)
+                
+                all_chapters.extend(batch_chapters)
+                
+                # Add small delay between batches to prevent overwhelming
+                if batch_num < max_batches - 1 and end_idx < total_items:
+                    time.sleep(0.1)
+                    print(f"DEBUG: Batch {batch_num + 1} completed, {len(all_chapters)} chapters so far")
             
             # Sort by chapter number (descending)
-            chapters.sort(key=lambda x: x['number'], reverse=True)
+            all_chapters.sort(key=lambda x: x['number'], reverse=True)
             
-            print(f"DEBUG: Processed {len(chapters)} chapters")
-            _chapter_cache[manga_id] = (chapters, current_time)
-            return chapters
+            print(f"DEBUG: Total processed {len(all_chapters)} chapters")
+            _chapter_cache[manga_id] = (all_chapters, current_time)
+            return all_chapters
             
         else:
             print(f"Failed to fetch manga info: {response.status_code}")

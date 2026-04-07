@@ -11,6 +11,7 @@ from .sites.kaynscan import search as kaynscan_search_func
 from .sites.kaynscan import manga_info as kaynscan_manga_info_func
 from .sites.kaynscan import browse_all_manga as kaynscan_browse_func
 from .sites.kaynscan import get_all_browse_manga as kaynscan_get_all_browse_func
+from .sites.kaynscan import clear_chapter_cache
 
 SCRAPER_TIMEOUT = 30
 
@@ -48,7 +49,9 @@ def manhwa(request):
 @permission_classes([])
 def chapters(request, manga_id):
     try:
-        chapters = kaynscan_manga_info_func(manga_id)
+        # Force refresh to get all chapters with new batch loading
+        force_refresh = request.GET.get('refresh', 'false').lower() == 'true'
+        chapters = kaynscan_manga_info_func(manga_id, force_refresh=force_refresh)
         return Response({"chapters": chapters})
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)
@@ -154,3 +157,14 @@ def browse_all_manga(request):
         return Response(data)
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def clear_cache_view(request):
+    """Clear chapter cache and end-of-chapter tracking"""
+    try:
+        clear_chapter_cache()
+        return Response({"message": "Cache cleared successfully"})
+    except Exception as e:
+        return Response({"error": "Failed to clear cache", "details": str(e)}, status=500)

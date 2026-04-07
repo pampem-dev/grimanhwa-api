@@ -12,4 +12,5 @@ urlpatterns = [
     path('kaynscan/chapter/<path:chapter_id>/', views.kaynscan_chapter_pages_view),
     path('kaynscan/browse/', views.browse_manga),
     path('kaynscan/browse-all/', views.browse_all_manga),
+    path('kaynscan/clear-cache/', views.clear_cache_view),
 ]
