@@ -323,11 +323,11 @@ def search(query, page=1):
         
         for search_url in search_urls:
             try:
-                print(f"Trying search URL: {search_url}")
+                # print(f"Trying search URL: {search_url}")
                 response = requests.get(search_url, timeout=10, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
-                print(f"Response status: {response.status_code}")
+                # print(f"Response status: {response.status_code}")
                 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.content, 'html.parser')
@@ -344,7 +344,7 @@ def search(query, page=1):
     else:
         # For home page queries, scrape the library but with special handling
         try:
-            print("Home page query - scraping library...")
+            # print("Home page query - scraping library...")
             response = requests.get(f"{base_url}/comics/", timeout=15, headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             })
@@ -352,20 +352,20 @@ def search(query, page=1):
                 soup = BeautifulSoup(response.content, 'html.parser')
                 library_manga = extract_all_manga_from_library(soup, base_url)
                 manga_list.extend(library_manga)
-                print(f"Home page library scrape found {len(library_manga)} manga")
+                # print(f"Home page library scrape found {len(library_manga)} manga")
                 
                 # Debug: Print first few manga for home page
                 if library_manga:
-                    print("DEBUG - Home page manga samples:")
+                    # print("DEBUG - Home page manga samples:")
                     for i, manga in enumerate(library_manga[:3]):
                         print(f"  {i+1}. Title: '{manga['title']}' | Cover: {manga['cover_url']}")
                         
         except Exception as e:
-            print(f"Home page library scrape failed: {e}")
+            # print(f"Home page library scrape failed: {e}")
             
             # Fallback: try homepage if library fails
             try:
-                print("Falling back to homepage scrape...")
+                # print("Falling back to homepage scrape...")
                 response = requests.get(base_url, timeout=15, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
@@ -377,7 +377,7 @@ def search(query, page=1):
                     
                     # Debug: Print first few manga from homepage
                     if homepage_manga:
-                        print("DEBUG - Homepage manga samples:")
+                        # print("DEBUG - Homepage samples:")
                         for i, manga in enumerate(homepage_manga[:3]):
                             print(f"  {i+1}. Title: '{manga['title']}' | Cover: {manga['cover_url']}")
                             
@@ -408,21 +408,21 @@ def extract_all_manga_from_library(soup, base_url):
     manga_list = []
     
     # Debug: Print the page title and structure
-    print("DEBUG - Library page analysis:")
+    # print("DEBUG - Library page analysis:")
     title_elem = soup.select_one('title')
     if title_elem:
         print(f"  Page title: {title_elem.get_text()}")
     
     # Debug: Print page content structure
-    print("DEBUG - Page structure:")
+    # print("DEBUG - Page structure:")
     all_links = soup.find_all('a')
-    print(f"  Total links found: {len(all_links)}")
+    # print(f"  Total links found: {len(all_links)}")
     
     comics_links = [a for a in all_links if '/comics/' in a.get('href', '')]
-    print(f"  Links with /comics/: {len(comics_links)}")
+    # print(f"  Links with /comics/: {len(comics_links)}")
     
     # Debug: Print all comics links found
-    print("DEBUG - All /comics/ links found:")
+    # print("DEBUG - All /comics/ links found:")
     for i, link in enumerate(comics_links[:10]):  # First 10
         href = link.get('href', '')
         text = link.get_text(strip=True).replace('\n', ' ').replace('\t', ' ').strip()
@@ -455,7 +455,7 @@ def extract_all_manga_from_library(soup, base_url):
             print(f"Found {len(items)} items with selector: {selector}")
     
     # Debug: Print first 5 items found
-    print("DEBUG - First 5 manga items found:")
+    # print("DEBUG - First 5 manga items found:")
     for i, item in enumerate(manga_items[:5]):
         title = item.get_text(strip=True).replace('\n', ' ').replace('\t', ' ').strip()
         link = item.get('href')
@@ -484,10 +484,21 @@ def extract_all_manga_from_library(soup, base_url):
         title_item = items['title_item']
         rating_item = items['rating_item']
         
+        # Extract rating from rating_item
+        rating = None
+        if rating_item:
+            rating_text = rating_item.get_text(strip=True)
+            # Rating is already identified as matching ^\d+\.\d+$
+            if re.match(r'^\d+\.\d+$', rating_text):
+                rating = float(rating_text)
+        
         # Create a combined item with title from title_item and image from rating_item
         if title_item or rating_item:
             # Use title_item as base, or rating_item if no title_item
             base_item = title_item if title_item else rating_item
+            
+            # Store rating on the item
+            base_item._rating = rating
             
             # If title_item exists but has no image, try to get image from rating_item
             if title_item and not title_item.select_one('img') and rating_item and rating_item.select_one('img'):
@@ -500,7 +511,7 @@ def extract_all_manga_from_library(soup, base_url):
             
             unique_items.append(base_item)
     
-    print(f"After removing duplicates (preferring longer titles): {len(unique_items)} unique manga items")
+    # print(f"After removing duplicates (preferring longer titles): {len(unique_items)} unique manga items")
     
     for item in unique_items:
         title = item.get_text(strip=True)
@@ -511,28 +522,60 @@ def extract_all_manga_from_library(soup, base_url):
         if not img_elem and hasattr(item, '_rating_img'):
             img_elem = item._rating_img
         
+        # Get rating from stored attribute
+        rating = getattr(item, '_rating', None)
+        
+        # If no rating from stored attribute, try to find it nearby
+        if not rating:
+            # Look for rating in parent or sibling elements
+            parent = item.parent
+            if parent:
+                # Try to find rating in parent text
+                parent_text = parent.get_text(strip=True)
+                rating_match = re.search(r'(\d+\.?\d*)', parent_text)
+                if rating_match:
+                    try:
+                        rating = float(rating_match.group(1))
+                        print(f"  Found rating in parent: {rating}")
+                    except:
+                        pass
+            
+            # If still no rating, try looking in nearby siblings
+            if not rating:
+                siblings = item.find_previous_siblings() + item.find_next_siblings()
+                for sibling in siblings[:3]:  # Check first 3 siblings
+                    sibling_text = sibling.get_text(strip=True)
+                    rating_match = re.search(r'(\d+\.?\d*)', sibling_text)
+                    if rating_match and re.match(r'^\d+\.\d+$', sibling_text):
+                        try:
+                            rating = float(rating_match.group(1))
+                            print(f"  Found rating in sibling: {rating}")
+                            break
+                        except:
+                            pass
+        
         # Clean up title
         title = title.replace('\n', ' ').replace('\t', ' ').strip()
         
         # Debug: Print what we're processing
-        print(f"Processing: Title='{title}' | Link='{link}' | HasImage={bool(img_elem)}")
+        # print(f"Processing: Title='{title}' | Link='{link}' | HasImage={bool(img_elem)} | Rating={rating}")
         
         # Skip if title is too short or empty
         if not title or len(title) < 3:
-            print(f"  Skipping: Title too short or empty")
+            # print(f"  Skipping: Title too short or empty")
             continue
             
         # Skip rating-only titles (numbers like "9.1", "8.4", etc.)
         if re.match(r'^\d+\.\d+$', title):
-            print(f"  Skipping: Rating-only title")
+            # print(f"  Skipping: Rating-only title")
             continue
             
         # Skip if link doesn't contain manga/comics
         if not link or ('comics/' not in link and 'manga' not in link.lower()):
-            print(f"  Skipping: Link doesn't contain comics/manga")
+            # print(f"  Skipping: Link doesn't contain comics/manga")
             continue
         
-        print(f"  ✓ Adding manga: {title}")
+        # print(f"  ✓ Adding manga: {title}")
         
         cover_url = img_elem.get('src')
         
@@ -553,28 +596,29 @@ def extract_all_manga_from_library(soup, base_url):
         # If no cover image, provide a placeholder
         if not cover_url:
             cover_url = "https://via.placeholder.com/300x450/374151/9CA3AF?text=No+Cover"
-            print(f"  No cover found for {title}, using placeholder")
+            # print(f"  No cover found for {title}, using placeholder")
         
         manga_list.append({
             'title': title,
             'id': link,
-            'cover_url': cover_url
+            'cover_url': cover_url,
+            'rating': rating
         })
     
-    print(f"Extracted {len(manga_list)} manga from library")
+    # print(f"Extracted {len(manga_list)} manga from library")
     
     # Debug: Print first 5 extracted manga
     if manga_list:
-        print("DEBUG - First 5 extracted manga:")
+        # print("DEBUG - First 5 extracted manga:")
         for i, manga in enumerate(manga_list[:5]):
             print(f"  {i+1}. {manga['title']}")
     
     # If still no manga, try a different approach - look for any text content
     if not manga_list:
-        print("DEBUG - No manga found, trying alternative approach...")
+        # print("DEBUG - No manga found, trying alternative approach...")
         # Look for any divs that might contain manga info
         all_divs = soup.find_all('div')
-        print(f"  Total divs: {len(all_divs)}")
+        # print(f"  Total divs: {len(all_divs)}")
         
         for i, div in enumerate(all_divs[:20]):  # First 20 divs
             div_text = div.get_text(strip=True).replace('\n', ' ').replace('\t', ' ').strip()
@@ -625,10 +669,10 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
                 manga_containers.extend(items)
                 print(f"Found {len(items)} items with selector: {selector}")
     
-    print(f"Total containers/items to process: {len(manga_containers)}")
+    # print(f"Total containers/items to process: {len(manga_containers)}")
     
     # Debug: Print first 10 items found
-    print("DEBUG - First 10 items found:")
+    # print("DEBUG - First 10 items found:")
     for i, item in enumerate(manga_containers[:10]):
         title = item.get_text(strip=True).replace('\n', ' ').replace('\t', ' ').strip()
         img = item.select_one('img')
