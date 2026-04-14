@@ -826,25 +826,24 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # DEBUG: Print page structure to find description
-            print("DEBUG: Looking for description...")
-            all_divs = soup.find_all('div')
-            print(f"DEBUG: Found {len(all_divs)} div elements")
-
-            # Look for divs with longer text (likely description)
-            for i, div in enumerate(all_divs):
-                text = div.get_text(strip=True)
-                if len(text) > 50 and len(text) < 500:  # Reasonable description length
-                    classes = div.get('class', [])
-                    print(f"  Div {i+1}: classes={classes}, text length={len(text)}, text='{text[:150]}'")
-
-            # Also check paragraphs
-            all_p = soup.find_all('p')
-            print(f"DEBUG: Found {len(all_p)} paragraph elements")
-            for i, p in enumerate(all_p[:10]):
-                text = p.get_text(strip=True)
-                if len(text) > 50:
-                    print(f"  P {i+1}: text length={len(text)}, text='{text[:150]}'")
+            # Extract alternative titles (from Div 71 in debug - contains titles separated by bullets)
+            alternative_titles = []
+            alt_title_selectors = [
+                'div.flex.items-start.gap-3.mt-3.text-xs',  # Div 71 from debug
+                'div.manga-alt-titles',
+                'div.alternative-titles',
+                'div.other-titles'
+            ]
+            for selector in alt_title_selectors:
+                alt_elem = soup.select_one(selector)
+                if alt_elem:
+                    alt_text = alt_elem.get_text(strip=True)
+                    # Split by bullet points or common separators
+                    titles = alt_text.split('•')
+                    titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
+                    if titles and len(titles) > 1:  # More than one title found
+                        alternative_titles = titles
+                        break
 
             # Extract description
             description = ""
@@ -873,7 +872,6 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
                 if desc_elem:
                     description = desc_elem.get_text(strip=True)
                     if description and len(description) > 10:  # Ensure it's not just whitespace or too short
-                        print(f"DEBUG: Found description with selector: {selector}")
                         break
 
             # Extract status
@@ -894,18 +892,13 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
                     # Look for status keywords in the text
                     if 'ongoing' in status_text:
                         status = 'ongoing'
-                        print(f"DEBUG: Found status with selector: {selector}")
                         break
                     elif 'completed' in status_text or 'finished' in status_text:
                         status = 'completed'
-                        print(f"DEBUG: Found status with selector: {selector}")
                         break
                     elif 'hiatus' in status_text:
                         status = 'hiatus'
-                        print(f"DEBUG: Found status with selector: {selector}")
                         break
-
-            print(f"DEBUG: Description length: {len(description)}, Status: {status}")
 
             # OPTIMIZED: Target specific chapter list selectors first
             chapter_selectors = [
@@ -1002,7 +995,8 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
             result = {
                 'chapters': all_chapters,
                 'description': description,
-                'status': status
+                'status': status,
+                'alternative_titles': alternative_titles
             }
             _chapter_cache[manga_id] = (result, current_time)
             return result
