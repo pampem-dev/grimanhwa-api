@@ -13,4 +13,12 @@ urlpatterns = [
     path('kaynscan/browse/', views.browse_manga),
     path('kaynscan/browse-all/', views.browse_all_manga),
     path('kaynscan/clear-cache/', views.clear_cache_view),
+    path('auth/login/', views.user_login),
+    path('auth/signup/', views.user_signup),
+    path('user/stats/', views.user_stats),
+    path('user/reading-history/', views.add_to_reading_history),
+    path('user/reading-history/get/', views.get_reading_history),
+    path('user/library/', views.add_to_library),
+    path('user/library/get/', views.get_library),
+    path('user/sync/', views.sync_user_data),
 ]

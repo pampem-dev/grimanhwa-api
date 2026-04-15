@@ -799,7 +799,7 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
             print(f"DEBUG: Using cached chapters for {manga_id}")
             # Handle both old format (array) and new format (object)
             if isinstance(cached_data, list):
-                return {'chapters': cached_data, 'description': '', 'status': 'Unknown'}
+                return {'chapters': cached_data, 'description': '', 'status': 'Unknown', 'title': '', 'cover': ''}
             return cached_data
     
     # Clear cache for this manga if force refresh
@@ -825,6 +825,40 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Extract manga title
+            manga_title = ''
+            title_selectors = [
+                'h1',
+                'h1.entry-title',
+                'h1.post-title',
+                '.post-title h1',
+                '.entry-title',
+                'div.manga-title',
+                'div.post-title'
+            ]
+            for selector in title_selectors:
+                title_elem = soup.select_one(selector)
+                if title_elem:
+                    manga_title = title_elem.get_text(strip=True)
+                    break
+
+            # Extract cover image
+            cover_image = ''
+            cover_selectors = [
+                'img.wp-post-image',
+                'div.summary_image img',
+                'div.manga-cover img',
+                '.post-thumbnail img',
+                'img[src*="cover"]',
+                'div.thumbnail img'
+            ]
+            for selector in cover_selectors:
+                cover_elem = soup.select_one(selector)
+                if cover_elem:
+                    cover_image = cover_elem.get('src') or cover_elem.get('data-src')
+                    if cover_image:
+                        break
 
             # Extract alternative titles (from Div 71 in debug - contains titles separated by bullets)
             alternative_titles = []
@@ -996,7 +1030,9 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
                 'chapters': all_chapters,
                 'description': description,
                 'status': status,
-                'alternative_titles': alternative_titles
+                'alternative_titles': alternative_titles,
+                'title': manga_title,
+                'cover': cover_image
             }
             _chapter_cache[manga_id] = (result, current_time)
             return result
