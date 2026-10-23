@@ -36,6 +36,10 @@ def get_selenium_driver():
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
+    # Performance optimizations
+    options.add_argument('--disable-software-rasterizer')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--blink-settings=imagesEnabled=false')  # Don't load images automatically
 
     # 2. IDENTITY: 
     # This makes the server look like a real Windows laptop, not a headless script.

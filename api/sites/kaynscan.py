@@ -9,7 +9,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 import requests
-from api.services import get_selenium_driver 
+from api.services import get_selenium_driver
 import threading
 
 # Simple in-memory cache for chapter pages
@@ -18,6 +18,10 @@ _cache_timeout = 3600  # 1 hour cache timeout
 
 # Track when we've reached the end of available chapters
 _empty_chapters_found = set()  # Store manga URLs that have reached end
+
+# Lock to prevent concurrent requests for the same manga
+_fetch_locks = {}  # manga_id -> Lock
+_fetch_locks_lock = threading.Lock()  # Lock for accessing _fetch_locks
 
 def clear_chapter_cache():
     """Clear the chapter cache and end-of-chapter tracking"""
@@ -38,13 +42,23 @@ def browse_all_manga(page=1):
     """Browse all manga from AsuraScans browse pages"""
     base_url = "https://asurascans.com"
     all_manga = []
-    
+
+    # Check cache for this specific page
+    cache_key = f"browse_page_{page}"
+    current_time = time.time()
+
+    if cache_key in _browse_cache:
+        cached_data, cached_time = _browse_cache[cache_key]
+        if current_time - cached_time < _browse_cache_timeout:
+            print(f"DEBUG: Using cached browse page {page}")
+            return cached_data
+
     try:
         # Scrape the specific browse page
         browse_url = f"{base_url}/browse"
         if page > 1:
             browse_url += f"?page={page}"
-            
+
         print(f"Scraping browse page {page}: {browse_url}")
         
         response = requests.get(browse_url, timeout=15, headers={
@@ -109,11 +123,16 @@ def browse_all_manga(page=1):
                 for i, link in enumerate(all_links[:10]):
                     print(f"  {i+1}. {link.get_text(strip=True)[:50]} -> {link.get('href')}")
             
-            return {
+            result = {
                 'manga': manga_list,
                 'page': page,
                 'total_on_page': len(manga_list)
             }
+
+            # Cache the result
+            _browse_cache[cache_key] = (result, current_time)
+
+            return result
         else:
             print(f"Failed to fetch browse page {page}: Status {response.status_code}")
             return {'manga': [], 'page': page, 'total_on_page': 0}
@@ -786,12 +805,19 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
     return manga_list
 
 def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
-    """Get manga info and chapters from AsuraScans - BATCH LOADING"""
+    """Get manga info and chapters from AsuraScans - BATCH LOADING
+    
+    Args:
+        manga_id: URL of the manga page
+        batch_size: Number of chapters to fetch per batch
+        max_batches: Maximum number of batches to fetch
+        force_refresh: Ignore cache and fetch fresh data
+    """
     if not manga_id:
         return []
-    
+
     current_time = time.time()
-    
+
     # Check cache first (unless force refresh)
     if not force_refresh and manga_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[manga_id]
@@ -801,13 +827,30 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
             if isinstance(cached_data, list):
                 return {'chapters': cached_data, 'description': '', 'status': 'Unknown', 'title': '', 'cover': ''}
             return cached_data
-    
-    # Clear cache for this manga if force refresh
-    if force_refresh and manga_id in _chapter_cache:
-        del _chapter_cache[manga_id]
-        print(f"DEBUG: Cleared cache for {manga_id}")
-    
-    print(f"DEBUG: Fetching chapters for {manga_id} (batch size: {batch_size})")
+
+    # Get or create a lock for this manga_id
+    with _fetch_locks_lock:
+        if manga_id not in _fetch_locks:
+            _fetch_locks[manga_id] = threading.Lock()
+        manga_lock = _fetch_locks[manga_id]
+
+    # Acquire lock to prevent concurrent requests for the same manga
+    with manga_lock:
+        # Double-check cache after acquiring lock (another thread might have populated it)
+        if not force_refresh and manga_id in _chapter_cache:
+            cached_data, cached_time = _chapter_cache[manga_id]
+            if current_time - cached_time < _cache_timeout:
+                print(f"DEBUG: Using cached chapters for {manga_id} (post-lock)")
+                if isinstance(cached_data, list):
+                    return {'chapters': cached_data, 'description': '', 'status': 'Unknown', 'title': '', 'cover': ''}
+                return cached_data
+
+        # Clear cache for this manga if force refresh
+        if force_refresh and manga_id in _chapter_cache:
+            del _chapter_cache[manga_id]
+            print(f"DEBUG: Cleared cache for {manga_id}")
+
+        print(f"DEBUG: Fetching chapters for {manga_id} (batch size: {batch_size})")
     
     all_chapters = []
     seen_urls = set()
@@ -1071,6 +1114,7 @@ def chapter_pages(chapter_id):
     if chapter_id in _chapter_cache:
         cached_data, cached_time = _chapter_cache[chapter_id]
         if current_time - cached_time < _cache_timeout:
+            print(f"DEBUG: Cache hit for {chapter_id}")
             return cached_data
 
     # 2. Sequential Execution with Lock
@@ -1082,30 +1126,48 @@ def chapter_pages(chapter_id):
 
         try:
             driver.get(chapter_id)
-            
-            # Brief pause for Cloudflare/Initial Load
-            time.sleep(4) 
-            
-            # 3. FAST OPTIMIZED SCROLLING
-            # Instead of a fixed 15 scrolls, we scroll only until new content stops appearing
+
+            # Brief pause for Cloudflare/Initial Load - reduced to 1.5s for faster initial load
+            time.sleep(1.5)
+
+            # Check if we were redirected to a different chapter
+            current_url = driver.current_url
+            if current_url != chapter_id:
+                # Extract expected chapter number from requested URL
+                import re
+                expected_chapter = re.search(r'/chapter/(\d+)', chapter_id)
+                actual_chapter = re.search(r'/chapter/(\d+)', current_url)
+                
+                if expected_chapter and actual_chapter:
+                    expected_num = expected_chapter.group(1)
+                    actual_num = actual_chapter.group(1)
+                    if expected_num != actual_num:
+                        print(f"DEBUG: Redirect detected! Expected chapter {expected_num}, redirected to {actual_num}")
+                        print(f"DEBUG: Original URL: {chapter_id}")
+                        print(f"DEBUG: Actual URL: {current_url}")
+                        # Return empty to indicate this chapter doesn't exist or is redirected
+                        return []
+
+            # 3. FAST OPTIMIZED SCROLLING - Only scroll enough to get first few pages
+            # Reduced attempts and wait times for faster response
             print("DEBUG: Executing smart scroll...")
             last_height = driver.execute_script("return document.body.scrollHeight")
-            
-            for i in range(8):  # Max 8 attempts to find new height
+
+            for i in range(3):  # Reduced to 3 attempts - enough for first few pages
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1.5)  # Wait for lazy-load images
-                
+                time.sleep(0.3)  # Reduced to 0.3s
+
                 new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     # Try one tiny "nudge" scroll to be sure
                     driver.execute_script("window.scrollBy(0, -200);")
-                    time.sleep(0.5)
+                    time.sleep(0.2)  # Reduced to 0.2s
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    
+
                     # If still no change, we are done
                     if driver.execute_script("return document.body.scrollHeight") == last_height:
                         break
-                
+
                 last_height = new_height
                 print(f"DEBUG: Scroll {i+1} successful, height: {last_height}")
 
@@ -1122,7 +1184,13 @@ def chapter_pages(chapter_id):
             if len(pages) == 0:
                 print(f"DEBUG: Marking manga {base_url} as reached end (0 pages found)")
                 _empty_chapters_found.add(base_url)
-            
+            else:
+                # If pages found successfully, remove from empty_chapters_found
+                # This allows fetching future chapters if a previous one was empty
+                if base_url in _empty_chapters_found:
+                    print(f"DEBUG: Removing manga {base_url} from empty list - chapter found")
+                    _empty_chapters_found.remove(base_url)
+
             _chapter_cache[chapter_id] = (pages, current_time)
             return pages
 
@@ -1134,6 +1202,114 @@ def chapter_pages(chapter_id):
             # Crucial: Always quit the driver to free up RAM
             driver.quit()
             print(f"DEBUG: Driver closed for: {chapter_id}")
+
+def latest_chapter(manga_id):
+    """Get only the latest chapter for a manga - much faster for home page display
+    
+    Args:
+        manga_id: URL of the manga page
+        
+    Returns:
+        Dictionary with latest chapter info
+    """
+    if not manga_id:
+        return {'latest_chapter': None}
+    
+    current_time = time.time()
+    
+    # Check cache first
+    cache_key = f"latest_{manga_id}"
+    if cache_key in _chapter_cache:
+        cached_data, cached_time = _chapter_cache[cache_key]
+        if current_time - cached_time < _cache_timeout:
+            print(f"DEBUG: Using cached latest chapter for {manga_id}")
+            return cached_data
+    
+    try:
+        # Use requests for fast fetching (no Selenium needed for just chapter links)
+        response = requests.get(manga_id, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Try specific chapter list selectors
+            chapter_selectors = [
+                'ul.chapter-list a',
+                'div.chapter-list a',
+                'div.wp-block-group a[href*="/chapter/"]',
+                'div.entry-content a[href*="/chapter/"]',
+                'main a[href*="/chapter/"]',
+                'article a[href*="/chapter/"]'
+            ]
+            
+            chapter_items = []
+            for selector in chapter_selectors:
+                items = soup.select(selector)
+                if items:
+                    chapter_items = items
+                    print(f"DEBUG: Found {len(items)} chapters for latest check")
+                    break
+            
+            # Fallback to global search
+            if not chapter_items:
+                chapter_items = soup.select('a[href*="/chapter/"]')
+            
+            # Find the chapter with the highest number (the actual latest)
+            # Only check first 50 chapters since latest is usually near the top
+            if chapter_items:
+                latest_item = None
+                latest_chapter_num = 0
+                items_to_check = chapter_items[:50]  # Limit to first 50 for performance
+                
+                for item in items_to_check:
+                    chapter_url = item.get('href')
+                    chapter_title = item.get_text(strip=True).split('\n')[0].strip()
+                    
+                    # Skip navigation buttons
+                    if any(x in chapter_title.lower() for x in ['first chapter', 'prev chapter', 'next chapter', 'latest chapter']):
+                        continue
+                    
+                    # Extract chapter number
+                    chapter_num = extract_chapter_number(chapter_title, chapter_url)
+                    
+                    if chapter_num > latest_chapter_num:
+                        latest_chapter_num = chapter_num
+                        latest_item = item
+                
+                if latest_item:
+                    chapter_url = latest_item.get('href')
+                    chapter_title = latest_item.get_text(strip=True).split('\n')[0].strip()
+                    
+                    # Normalize URL
+                    if chapter_url and not chapter_url.startswith('http'):
+                        chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
+                    
+                    result = {
+                        'latest_chapter': {
+                            'title': chapter_title,
+                            'url': chapter_url
+                        }
+                    }
+                    
+                    # Cache the result
+                    _chapter_cache[cache_key] = (result, current_time)
+                    print(f"DEBUG: Cached latest chapter {latest_chapter_num} for {manga_id}")
+                    return result
+                else:
+                    return {'latest_chapter': None}
+            else:
+                return {'latest_chapter': None}
+                
+    except Exception as e:
+        print(f"DEBUG: Error fetching latest chapter for {manga_id}: {e}")
+        return {'latest_chapter': None}
 def extract_pages_from_soup(soup):
     """Extract pages from BeautifulSoup object - shared logic for both requests and Selenium"""
     print(f"DEBUG: Starting page extraction from HTML with {len(soup.select('img'))} total images")

@@ -16,6 +16,7 @@ User = get_user_model()
 from .sites.kaynscan import chapter_pages as kaynscan_chapter_pages
 from .sites.kaynscan import search as kaynscan_search_func
 from .sites.kaynscan import manga_info as kaynscan_manga_info_func
+from .sites.kaynscan import latest_chapter as kaynscan_latest_chapter
 from .sites.kaynscan import browse_all_manga as kaynscan_browse_func
 from .sites.kaynscan import get_all_browse_manga as kaynscan_get_all_browse_func
 from .sites.kaynscan import clear_chapter_cache
@@ -124,6 +125,21 @@ def kaynscan_manga_info_view(request):
     try:
         chapters = kaynscan_manga_info_func(manga_id, force_refresh=force_refresh)
         return Response(chapters)
+    except Exception as e:
+        return Response({"error": "Scraper failed", "details": str(e)}, status=503)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def kaynscan_latest_chapter_view(request):
+    """Get only the latest chapter for a manga - optimized for home page"""
+    manga_id = request.GET.get("id")
+    if not manga_id:
+        return Response({"error": "Missing id parameter"}, status=400)
+
+    try:
+        result = kaynscan_latest_chapter(manga_id)
+        return Response(result)
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)
 

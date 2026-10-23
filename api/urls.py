@@ -9,6 +9,7 @@ urlpatterns = [
     path('proxy-image/', views.proxy_image),
     path('kaynscan/search/', views.kaynscan_search),
     path('kaynscan/manga/', views.kaynscan_manga_info_view),
+    path('kaynscan/latest-chapter/', views.kaynscan_latest_chapter_view),
     path('kaynscan/chapter/<path:chapter_id>/', views.kaynscan_chapter_pages_view),
     path('kaynscan/browse/', views.browse_manga),
     path('kaynscan/browse-all/', views.browse_all_manga),
