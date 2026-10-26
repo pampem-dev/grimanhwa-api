@@ -534,3 +534,34 @@ def sync_user_data(request):
         "total_read": user.total_read_count,
         "reading_streak": user.reading_streak
     })
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def user_count(request):
+    """Get current online user count (including non-logged-in users)"""
+    try:
+        from django.core.cache import cache
+        import time
+
+        # Get online users dictionary from cache
+        online_users = cache.get('online_users', {})
+
+        # Clean up old entries before counting
+        from django.conf import settings
+        timeout = getattr(settings, 'ONLINE_USER_TIMEOUT', 300)
+        current_time = time.time()
+
+        # Filter out old entries
+        online_users = {
+            ip: timestamp for ip, timestamp in online_users.items()
+            if current_time - timestamp < timeout
+        }
+
+        # Update cache with cleaned data
+        cache.set('online_users', online_users, timeout + 60)
+
+        # Return count
+        return Response({"count": len(online_users)})
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)

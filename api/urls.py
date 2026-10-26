@@ -22,4 +22,5 @@ urlpatterns = [
     path('user/library/', views.add_to_library),
     path('user/library/get/', views.get_library),
     path('user/sync/', views.sync_user_data),
+    path('user-count/', views.user_count),
 ]

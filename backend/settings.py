@@ -54,6 +54,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'api.middleware.TrackOnlineUsersMiddleware',
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
@@ -138,3 +139,14 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.TokenAuthentication',
     ],
 }
+
+# Cache configuration for tracking online users
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'online-users-cache',
+    }
+}
+
+# Online user tracking settings
+ONLINE_USER_TIMEOUT = 300  # 5 minutes in seconds
