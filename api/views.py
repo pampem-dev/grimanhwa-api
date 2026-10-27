@@ -565,3 +565,53 @@ def user_count(request):
         return Response({"count": len(online_users)})
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def get_manga_from_db(request):
+    """Get manga list from database with sorting options"""
+    from .models import Manga
+
+    try:
+        # Get sorting parameter
+        sort_by = request.GET.get('sort', 'title')  # title, chapter_count, rating, last_updated
+        order = request.GET.get('order', 'asc')  # asc, desc
+
+        # Query manga from database
+        queryset = Manga.objects.all()
+
+        # Apply sorting
+        if sort_by == 'chapter_count':
+            queryset = queryset.order_by(f'-{sort_by}' if order == 'desc' else sort_by)
+        elif sort_by == 'rating':
+            queryset = queryset.order_by(f'-{sort_by}' if order == 'desc' else f'-{sort_by}')
+        elif sort_by == 'last_updated':
+            queryset = queryset.order_by(f'-{sort_by}' if order == 'desc' else sort_by)
+        else:  # title
+            queryset = queryset.order_by('title')
+
+        # Convert to list of dicts
+        manga_list = []
+        for manga in queryset:
+            manga_list.append({
+                'id': manga.url,
+                'title': manga.title,
+                'url': manga.url,
+                'cover_url': manga.cover_url,
+                'rating': manga.rating,
+                'chapter_count': manga.chapter_count,
+                'status': manga.status,
+                'description': manga.description,
+                'alternative_titles': manga.alternative_titles,
+                'last_updated': manga.last_updated.isoformat() if manga.last_updated else None,
+            })
+
+        return Response({
+            'manga': manga_list,
+            'total': len(manga_list),
+            'sort_by': sort_by,
+            'order': order
+        })
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)

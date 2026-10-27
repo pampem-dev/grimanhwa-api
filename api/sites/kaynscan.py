@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 import requests
 from api.services import get_selenium_driver
 import threading
+from api.models import Manga, Chapter
 
 # Simple in-memory cache for chapter pages
 _chapter_cache = {}
@@ -37,6 +38,204 @@ _search_cache_timeout = 1800  # 30 minutes for search
 # Cache for browse results
 _browse_cache = {}
 _browse_cache_timeout = 3600  # 1 hour for browse results
+
+def save_manga_to_db(manga_data):
+    """Save or update manga in the database"""
+    try:
+        url = manga_data.get('url') or manga_data.get('id')
+        if not url:
+            print(f"✗ Skipping manga (no URL): {manga_data.get('title', 'Unknown')}")
+            return None
+
+        # Truncate values to fit database constraints
+        title = manga_data.get('title', '')[:500]
+        cover_url = (manga_data.get('cover_url') or manga_data.get('cover', ''))[:1000]
+        description = manga_data.get('description', '')[:5000]
+
+        manga, created = Manga.objects.update_or_create(
+            url=url,
+            defaults={
+                'title': title,
+                'cover_url': cover_url,
+                'rating': manga_data.get('rating'),
+                'status': manga_data.get('status', 'Unknown'),
+                'description': description,
+                'alternative_titles': manga_data.get('alternative_titles', []),
+                'chapter_count': manga_data.get('chapter_count', 0),
+            }
+        )
+        if created:
+            print(f"✓ Created manga: {manga.title}")
+        else:
+            print(f"✓ Updated manga: {manga.title}")
+        return manga
+    except Exception as e:
+        print(f"✗ Error saving manga to DB ({manga_data.get('title', 'Unknown')}): {e}")
+        return None
+
+def save_chapters_to_db(manga, chapters_data):
+    """Save or update chapters in the database"""
+    try:
+        chapter_count = 0
+        for chapter_data in chapters_data:
+            chapter_id = chapter_data.get('id')
+            if not chapter_id:
+                continue
+
+            Chapter.objects.update_or_create(
+                chapter_id=chapter_id,
+                defaults={
+                    'manga': manga,
+                    'title': chapter_data.get('title', ''),
+                    'number': chapter_data.get('number', 0),
+                    'url': chapter_data.get('url', chapter_id),
+                    'is_locked': chapter_data.get('is_locked', False),
+                }
+            )
+            chapter_count += 1
+
+        # Update manga chapter count
+        manga.chapter_count = chapter_count
+        manga.save()
+
+        print(f"✓ Saved {chapter_count} chapters for {manga.title}")
+        return chapter_count
+    except Exception as e:
+        print(f"Error saving chapters to DB: {e}")
+        return 0
+
+def lightweight_manga_update(manga_url, manga_obj=None):
+    """Lightweight update - fetches new chapters only and updates chapter count/status"""
+    try:
+        response = requests.get(manga_url, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+
+        if response.status_code != 200:
+            return None, 'Unknown', 0
+
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Extract status (lightweight)
+        status = "Unknown"
+        status_selectors = [
+            'div.lg\\:max-w-\\[400px\\]',
+            'div[class*="lg:max-w"]',
+            'div.summary-content .status',
+            'div.post-content .status',
+            'div.manga-info .status',
+            'span.status',
+            'div.status'
+        ]
+        for selector in status_selectors:
+            status_elem = soup.select_one(selector)
+            if status_elem:
+                status_text = status_elem.get_text(strip=True).lower()
+                if 'ongoing' in status_text:
+                    status = 'ongoing'
+                    break
+                elif 'completed' in status_text or 'finished' in status_text:
+                    status = 'completed'
+                    break
+                elif 'hiatus' in status_text:
+                    status = 'hiatus'
+                    break
+
+        # Extract chapter list
+        chapter_selectors = [
+            'ul.chapter-list a',
+            'div.chapter-list a',
+            'div.wp-block-group a[href*="/chapter/"]',
+            'div.entry-content a[href*="/chapter/"]',
+            'main a[href*="/chapter/"]',
+            'article a[href*="/chapter/"]',
+            'div.post-content a[href*="/chapter/"]',
+            'div.content a[href*="/chapter/"]'
+        ]
+
+        chapter_items = []
+        for selector in chapter_selectors:
+            items = soup.select(selector)
+            if items:
+                chapter_items = items
+                break
+
+        if not chapter_items:
+            chapter_items = soup.select('a[href*="/chapter/"]')
+
+        # Get existing chapter URLs from database (if manga_obj provided)
+        existing_chapter_urls = set()
+        if manga_obj:
+            existing_chapter_urls = set(Chapter.objects.filter(manga=manga_obj).values_list('url', flat=True))
+
+        # Process chapters and only save NEW ones
+        seen_urls = set()
+        new_chapters = []
+        for item in chapter_items:
+            chapter_url = item.get('href')
+            chapter_title = item.get_text(strip=True).split('\n')[0].strip()
+
+            if not chapter_url or chapter_url in seen_urls:
+                continue
+
+            if not chapter_title or len(chapter_title) < 3:
+                continue
+
+            if any(x in chapter_title.lower() for x in ['first chapter', 'latest chapter', 'next chapter', 'prev chapter']):
+                continue
+
+            # Normalize URL
+            if not chapter_url.startswith('http'):
+                chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
+
+            seen_urls.add(chapter_url)
+
+            # Only add if it's a NEW chapter (not in database)
+            if manga_obj and chapter_url not in existing_chapter_urls:
+                chapter_num = extract_chapter_number(chapter_title, chapter_url)
+                is_locked = any(
+                    indicator in item.get('class', []) or
+                    indicator in chapter_title.lower() or
+                    item.select('i[class*="lock"], .lock, .locked')
+                    for indicator in ['lock', 'locked', 'premium', 'paid']
+                )
+                new_chapters.append({
+                    'chapter_id': chapter_url,
+                    'title': chapter_title,
+                    'number': chapter_num,
+                    'url': chapter_url,
+                    'is_locked': is_locked
+                })
+
+        # Save new chapters to database
+        new_chapters_count = 0
+        if manga_obj and new_chapters:
+            for chapter_data in new_chapters:
+                Chapter.objects.update_or_create(
+                    chapter_id=chapter_data['chapter_id'],
+                    defaults={
+                        'manga': manga_obj,
+                        'title': chapter_data['title'],
+                        'number': chapter_data['number'],
+                        'url': chapter_data['url'],
+                        'is_locked': chapter_data['is_locked'],
+                    }
+                )
+                new_chapters_count += 1
+
+        # Get total chapter count (existing + new)
+        total_chapter_count = len(seen_urls)
+
+        return total_chapter_count, status, new_chapters_count
+
+    except Exception as e:
+        print(f"Error in lightweight update: {e}")
+        return None, 'Unknown', 0
 
 def browse_all_manga(page=1):
     """Browse all manga from AsuraScans browse pages"""
@@ -147,10 +346,10 @@ def extract_manga_data_from_item(item, base_url):
         title = item.get_text(strip=True)
         link = item.get('href')
         img_elem = item.select_one('img')
-        
+
         # Clean up title
         title = title.replace('\n', ' ').replace('\t', ' ').strip()
-        
+
         if title and len(title) > 2 and link:
             # Convert relative URL to absolute
             if link and not link.startswith('http'):
@@ -158,27 +357,58 @@ def extract_manga_data_from_item(item, base_url):
                     link = base_url + link
                 else:
                     link = base_url + '/' + link
-            
+
             cover_url = img_elem.get('src') if img_elem else None
             if cover_url and not cover_url.startswith('http'):
                 if cover_url.startswith('/'):
                     cover_url = base_url + cover_url
                 else:
                     cover_url = base_url + '/' + cover_url
-            
-            # Extract ID from URL
-            manga_id = link.split('/')[-1] if link else ''
-            
+
+            # Try to extract chapter count from the item or its parent
+            chapter_count = 0
+            chapter_selectors = [
+                'span.chapter-count',
+                'span.chapters',
+                'div.chapter-count',
+                'span.numchaps',
+                'div.item-rating',  # Sometimes contains chapter info
+                'span.eps',
+                'span.episodes'
+            ]
+
+            for selector in chapter_selectors:
+                chapter_elem = item.select_one(selector)
+                if chapter_elem:
+                    chapter_text = chapter_elem.get_text(strip=True)
+                    # Extract number from text like "120 Chapters" or "120"
+                    import re
+                    match = re.search(r'\d+', chapter_text)
+                    if match:
+                        chapter_count = int(match.group())
+                        break
+
+            # Also check parent elements for chapter count
+            if chapter_count == 0:
+                parent = item.parent
+                if parent:
+                    parent_text = parent.get_text(strip=True)
+                    import re
+                    match = re.search(r'(\d+)\s*(?:chapter|ch|ep|episode)', parent_text, re.IGNORECASE)
+                    if match:
+                        chapter_count = int(match.group())
+
             return {
-                'id': manga_id,
-                'title': title,
+                'id': link,
                 'url': link,
+                'title': title,
                 'cover_url': cover_url,
-                'cover': cover_url
+                'cover': cover_url,
+                'chapter_count': chapter_count
             }
     except Exception as e:
         print(f"Error extracting manga data: {str(e)}")
-    
+
     return None
 
 def get_all_browse_manga():
@@ -261,16 +491,29 @@ def get_all_browse_manga():
                 unique_manga.append(manga)
         
         print(f"After deduplication: {len(unique_manga)} unique manga")
-        
+
+        # Save to database
+        saved_count = 0
+        failed_count = 0
+        for i, manga_data in enumerate(unique_manga):
+            result = save_manga_to_db(manga_data)
+            if result:
+                saved_count += 1
+            else:
+                failed_count += 1
+                if i < 10:  # Log first 10 failures
+                    print(f"  Failed to save: {manga_data.get('title', 'Unknown')} - URL: {manga_data.get('url', 'N/A')[:50]}")
+        print(f"✓ Saved {saved_count} manga to database (Failed: {failed_count})")
+
         result = {
             'manga': unique_manga,
             'total_pages': max_pages,
             'total_manga': len(unique_manga)
         }
-        
+
         # Cache the result
         _browse_cache[cache_key] = (result, current_time)
-        
+
         return result
         
     except Exception as e:
@@ -616,13 +859,28 @@ def extract_all_manga_from_library(soup, base_url):
         if not cover_url:
             cover_url = "https://via.placeholder.com/300x450/374151/9CA3AF?text=No+Cover"
             # print(f"  No cover found for {title}, using placeholder")
-        
+
+        # Try to extract chapter count from parent or nearby elements
+        chapter_count = 0
+        parent = item.parent
+        if parent:
+            parent_text = parent.get_text(strip=True)
+            chapter_match = re.search(r'(\d+)\s*(?:chapter|ch|ep|episode)', parent_text, re.IGNORECASE)
+            if chapter_match:
+                chapter_count = int(chapter_match.group(1))
+
         manga_list.append({
             'title': title,
             'id': link,
+            'url': link,
             'cover_url': cover_url,
-            'rating': rating
+            'rating': rating,
+            'chapter_count': chapter_count
         })
+
+        # Log first few manga with chapter counts
+        if len(manga_list) <= 5:
+            print(f"  {len(manga_list)}. {title} - Chapters: {chapter_count}")
     
     # print(f"Extracted {len(manga_list)} manga from library")
     
@@ -787,10 +1045,11 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
             print(f"  No cover found for {title}, using placeholder")
         
         print(f"  ✓ Adding manga: {title}")
-        
+
         manga_list.append({
             'title': title,
             'id': link,
+            'url': link,
             'cover_url': cover_url
         })
     
@@ -806,7 +1065,7 @@ def extract_manga_from_soup(soup, base_url, query_filter=None):
 
 def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
     """Get manga info and chapters from AsuraScans - BATCH LOADING
-    
+
     Args:
         manga_id: URL of the manga page
         batch_size: Number of chapters to fetch per batch
@@ -816,6 +1075,7 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
     if not manga_id:
         return []
 
+    manga_url = manga_id
     current_time = time.time()
 
     # Check cache first (unless force refresh)
@@ -1069,6 +1329,24 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
             all_chapters.sort(key=lambda x: x['number'], reverse=True)
 
             print(f"DEBUG: Total processed {len(all_chapters)} chapters")
+
+            # Save to database
+            # First save/update the manga
+            manga_data = {
+                'id': manga_id,
+                'title': manga_title,
+                'url': manga_id,
+                'cover_url': cover_image,
+                'status': status,
+                'description': description,
+                'alternative_titles': alternative_titles,
+            }
+            manga = save_manga_to_db(manga_data)
+
+            # Then save chapters
+            if manga:
+                save_chapters_to_db(manga, all_chapters)
+
             result = {
                 'chapters': all_chapters,
                 'description': description,
@@ -1205,18 +1483,18 @@ def chapter_pages(chapter_id):
 
 def latest_chapter(manga_id):
     """Get only the latest chapter for a manga - much faster for home page display
-    
+
     Args:
         manga_id: URL of the manga page
-        
+
     Returns:
         Dictionary with latest chapter info
     """
     if not manga_id:
         return {'latest_chapter': None}
-    
+
     current_time = time.time()
-    
+
     # Check cache first
     cache_key = f"latest_{manga_id}"
     if cache_key in _chapter_cache:
@@ -1224,7 +1502,7 @@ def latest_chapter(manga_id):
         if current_time - cached_time < _cache_timeout:
             print(f"DEBUG: Using cached latest chapter for {manga_id}")
             return cached_data
-    
+
     try:
         # Use requests for fast fetching (no Selenium needed for just chapter links)
         response = requests.get(manga_id, timeout=10, headers={

@@ -94,3 +94,55 @@ def setup_groups_and_permissions():
     admin_group.permissions.add(read_perm, download_perm, manage_users_perm, admin_panel_perm)
 
     return readers_group, admin_group
+
+
+class Manga(models.Model):
+    """Manga/Manhwa model for storing scraped data"""
+    url = models.URLField(max_length=1000, unique=True, db_index=True)
+    title = models.CharField(max_length=500)
+    cover_url = models.URLField(max_length=1000)
+    rating = models.FloatField(null=True, blank=True)
+    chapter_count = models.IntegerField(default=0)
+    status = models.CharField(max_length=50, default='Unknown')
+    description = models.TextField(blank=True)
+    alternative_titles = models.JSONField(default=list, blank=True)
+    last_updated = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'manga'
+        verbose_name = 'Manga'
+        verbose_name_plural = 'Manga'
+        ordering = ['-last_updated']
+        indexes = [
+            models.Index(fields=['url']),
+            models.Index(fields=['title']),
+            models.Index(fields=['chapter_count']),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class Chapter(models.Model):
+    """Chapter model for storing chapter data"""
+    manga = models.ForeignKey(Manga, on_delete=models.CASCADE, related_name='chapters')
+    chapter_id = models.CharField(max_length=500, unique=True, db_index=True)
+    title = models.CharField(max_length=500)
+    number = models.IntegerField()
+    url = models.URLField(max_length=1000)
+    is_locked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'chapter'
+        verbose_name = 'Chapter'
+        verbose_name_plural = 'Chapters'
+        ordering = ['-number']
+        indexes = [
+            models.Index(fields=['chapter_id']),
+            models.Index(fields=['manga', 'number']),
+        ]
+
+    def __str__(self):
+        return f"{self.manga.title} - Chapter {self.number}"
