@@ -12,6 +12,10 @@ schedule = "0 0 * * *"
 command = "python manage.py update_chapter_counts"
 
 [[cron]]
+schedule = "0 3 * * *"
+command = "python manage.py update_ratings"
+
+[[cron]]
 schedule = "0 6 * * *"
 command = "python manage.py update_chapter_counts"
 
