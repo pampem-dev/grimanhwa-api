@@ -7,13 +7,19 @@ class Command(BaseCommand):
     help = 'Update chapter counts only for manga with chapter_count = 0 (for initial setup)'
 
     def handle(self, *args, **options):
-        self.stdout.write("Starting chapter update for manga with chapter_count = 0...")
+        self.stdout.write("Starting chapter update for manga with chapter_count = 0 (incremental)...")
         self.stdout.write("=" * 50)
 
         # Get only manga with chapter_count = 0
-        manga_to_update = Manga.objects.filter(chapter_count=0)
+        # Sort by last_updated to prioritize stale manga
+        # Limit to 150 per run for Railway free tier
+        manga_to_update = Manga.objects.filter(
+            chapter_count=0
+        ).order_by('last_updated')[:150]
+
         total = manga_to_update.count()
-        self.stdout.write(f"Found {total} manga with chapter_count = 0")
+        total_zero = Manga.objects.filter(chapter_count=0).count()
+        self.stdout.write(f"Found {total_zero} manga with chapter_count = 0 (updating {total} this run, max 150)")
 
         if total == 0:
             self.stdout.write(self.style.SUCCESS("All manga already have chapter counts!"))
@@ -54,7 +60,8 @@ class Command(BaseCommand):
                 failed_count += 1
 
         self.stdout.write("\n" + "=" * 50)
-        self.stdout.write(self.style.SUCCESS("Update complete!"))
-        self.stdout.write(f"✓ Updated: {updated_count}")
+        self.stdout.write(self.style.SUCCESS("Incremental update complete!"))
+        self.stdout.write(f"✓ Updated: {updated_count}/{total}")
         self.stdout.write(f"✗ Failed: {failed_count}")
         self.stdout.write(f"📖 New chapters fetched: {total_new_chapters}")
+        self.stdout.write(f"⏱️  Remaining manga with chapter_count = 0: {max(0, total_zero - 150)}")
