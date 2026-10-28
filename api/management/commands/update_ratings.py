@@ -58,7 +58,7 @@ class Command(BaseCommand):
                 # Extract rating - try multiple strategies
                 rating = None
 
-                # Strategy 1: Common rating selectors
+                # Strategy 1: Common rating selectors - only accept if surrounded by rating context
                 rating_selectors = [
                     'div.rating',
                     'span.rating',
@@ -81,44 +81,50 @@ class Command(BaseCommand):
                     rating_elem = soup.select_one(selector)
                     if rating_elem:
                         rating_text = rating_elem.get_text(strip=True)
-                        # Extract number from text like "4.5" or "Rating: 4.5"
-                        match = re.search(r'(\d+\.?\d*)', rating_text)
-                        if match:
-                            try:
-                                rating = float(match.group(1))
-                                if 0 <= rating <= 10:  # Validate rating range
-                                    break
-                            except:
-                                pass
+                        # Only extract if it looks like a rating (context clues)
+                        if any(word in rating_text.lower() for word in ['rating', 'rate', 'score', 'star', '/10', '/5']):
+                            match = re.search(r'(\d+\.?\d*)', rating_text)
+                            if match:
+                                try:
+                                    potential_rating = float(match.group(1))
+                                    # Be more strict: only accept ratings >= 3.0 and <= 10
+                                    if 3.0 <= potential_rating <= 10:
+                                        rating = potential_rating
+                                        break
+                                except:
+                                    pass
 
                 # Strategy 2: Look for rating in the title/post-header area
                 if rating is None:
-                    # Look for rating near h1/title
+                    # Look for rating near h1/title - but be very careful
                     title_elem = soup.find('h1')
                     if title_elem:
                         parent = title_elem.parent
                         if parent:
                             parent_text = parent.get_text(strip=True)
-                            match = re.search(r'(\d+\.?\d*)', parent_text)
-                            if match:
-                                try:
-                                    potential_rating = float(match.group(1))
-                                    if 0 <= potential_rating <= 10:
-                                        rating = potential_rating
-                                except:
-                                    pass
+                            # Only extract if there's rating context
+                            if any(word in parent_text.lower() for word in ['rating', 'rate', 'score', 'star', '/10', '/5']):
+                                match = re.search(r'(\d+\.?\d*)', parent_text)
+                                if match:
+                                    try:
+                                        potential_rating = float(match.group(1))
+                                        if 3.0 <= potential_rating <= 10:
+                                            rating = potential_rating
+                                    except:
+                                        pass
                         # Also check siblings of title
                         for sibling in title_elem.find_next_siblings()[:5]:
                             sibling_text = sibling.get_text(strip=True)
-                            match = re.search(r'(\d+\.?\d*)', sibling_text)
-                            if match:
-                                try:
-                                    potential_rating = float(match.group(1))
-                                    if 0 <= potential_rating <= 10:
-                                        rating = potential_rating
-                                        break
-                                except:
-                                    pass
+                            if any(word in sibling_text.lower() for word in ['rating', 'rate', 'score', 'star', '/10', '/5']):
+                                match = re.search(r'(\d+\.?\d*)', sibling_text)
+                                if match:
+                                    try:
+                                        potential_rating = float(match.group(1))
+                                        if 3.0 <= potential_rating <= 10:
+                                            rating = potential_rating
+                                            break
+                                    except:
+                                        pass
 
                 # Strategy 3: Look for rating in page title or meta tags
                 if rating is None:
@@ -126,7 +132,9 @@ class Command(BaseCommand):
                     meta_rating = soup.find('meta', attrs={'itemprop': 'ratingValue'})
                     if meta_rating and meta_rating.get('content'):
                         try:
-                            rating = float(meta_rating.get('content'))
+                            potential_rating = float(meta_rating.get('content'))
+                            if 3.0 <= potential_rating <= 10:
+                                rating = potential_rating
                         except:
                             pass
 
@@ -134,15 +142,17 @@ class Command(BaseCommand):
                 if rating is None:
                     for elem in soup.find_all(class_=re.compile(r'rating|score|rate', re.I)):
                         text = elem.get_text(strip=True)
-                        match = re.search(r'(\d+\.?\d*)', text)
-                        if match:
-                            try:
-                                potential_rating = float(match.group(1))
-                                if 0 <= potential_rating <= 10:
-                                    rating = potential_rating
-                                    break
-                            except:
-                                pass
+                        # Only extract if there's rating context
+                        if any(word in text.lower() for word in ['rating', 'rate', 'score', 'star', '/10', '/5']):
+                            match = re.search(r'(\d+\.?\d*)', text)
+                            if match:
+                                try:
+                                    potential_rating = float(match.group(1))
+                                    if 3.0 <= potential_rating <= 10:
+                                        rating = potential_rating
+                                        break
+                                except:
+                                    pass
 
                 if rating is not None:
                     manga.rating = rating
