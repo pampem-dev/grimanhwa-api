@@ -3,6 +3,7 @@ from api.models import Manga
 import requests
 from bs4 import BeautifulSoup
 import time
+import re
 
 class Command(BaseCommand):
     help = 'Update ratings for all manga in the database'
@@ -54,8 +55,10 @@ class Command(BaseCommand):
 
                 soup = BeautifulSoup(response.content, 'html.parser')
 
-                # Extract rating
+                # Extract rating - try multiple strategies
                 rating = None
+
+                # Strategy 1: Common rating selectors
                 rating_selectors = [
                     'div.rating',
                     'span.rating',
@@ -67,7 +70,11 @@ class Command(BaseCommand):
                     'div.rate',
                     'span.rate',
                     'div.score',
-                    'span.score'
+                    'span.score',
+                    'div.post-info .rating',
+                    'div.manga-header .rating',
+                    'div.series-rating',
+                    'span.series-rating'
                 ]
 
                 for selector in rating_selectors:
@@ -75,12 +82,64 @@ class Command(BaseCommand):
                     if rating_elem:
                         rating_text = rating_elem.get_text(strip=True)
                         # Extract number from text like "4.5" or "Rating: 4.5"
-                        import re
                         match = re.search(r'(\d+\.?\d*)', rating_text)
                         if match:
                             try:
                                 rating = float(match.group(1))
                                 if 0 <= rating <= 10:  # Validate rating range
+                                    break
+                            except:
+                                pass
+
+                # Strategy 2: Look for rating in the title/post-header area
+                if rating is None:
+                    # Look for rating near h1/title
+                    title_elem = soup.find('h1')
+                    if title_elem:
+                        parent = title_elem.parent
+                        if parent:
+                            parent_text = parent.get_text(strip=True)
+                            match = re.search(r'(\d+\.?\d*)', parent_text)
+                            if match:
+                                try:
+                                    potential_rating = float(match.group(1))
+                                    if 0 <= potential_rating <= 10:
+                                        rating = potential_rating
+                                except:
+                                    pass
+                        # Also check siblings of title
+                        for sibling in title_elem.find_next_siblings()[:5]:
+                            sibling_text = sibling.get_text(strip=True)
+                            match = re.search(r'(\d+\.?\d*)', sibling_text)
+                            if match:
+                                try:
+                                    potential_rating = float(match.group(1))
+                                    if 0 <= potential_rating <= 10:
+                                        rating = potential_rating
+                                        break
+                                except:
+                                    pass
+
+                # Strategy 3: Look for rating in page title or meta tags
+                if rating is None:
+                    # Check meta tags
+                    meta_rating = soup.find('meta', attrs={'itemprop': 'ratingValue'})
+                    if meta_rating and meta_rating.get('content'):
+                        try:
+                            rating = float(meta_rating.get('content'))
+                        except:
+                            pass
+
+                # Strategy 4: Look for any element with rating/score in class or id
+                if rating is None:
+                    for elem in soup.find_all(class_=re.compile(r'rating|score|rate', re.I)):
+                        text = elem.get_text(strip=True)
+                        match = re.search(r'(\d+\.?\d*)', text)
+                        if match:
+                            try:
+                                potential_rating = float(match.group(1))
+                                if 0 <= potential_rating <= 10:
+                                    rating = potential_rating
                                     break
                             except:
                                 pass
