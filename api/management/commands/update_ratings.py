@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import re
+from datetime import datetime, timedelta
 
 class Command(BaseCommand):
     help = 'Update ratings for all manga in the database'
@@ -12,22 +13,24 @@ class Command(BaseCommand):
         self.stdout.write("Starting rating update...")
         self.stdout.write("=" * 50)
 
-        # Get all manga with no rating
-        manga_to_update = Manga.objects.filter(rating__isnull=True)
+        # Get manga that haven't been updated in the last 3 days
+        # This ensures ratings are refreshed periodically
+        three_days_ago = datetime.now() - timedelta(days=3)
+        manga_to_update = Manga.objects.filter(last_updated__lt=three_days_ago)
         total = manga_to_update.count()
         total_in_db = Manga.objects.count()
-        with_rating = Manga.objects.filter(rating__isnull=False).count()
+        recent_count = Manga.objects.filter(last_updated__gte=three_days_ago).count()
 
         self.stdout.write(f"Total manga in DB: {total_in_db}")
-        self.stdout.write(f"With rating: {with_rating} | Without rating: {total}")
-        self.stdout.write(f"Updating {total} manga (limited to 150 per run)")
+        self.stdout.write(f"Recently updated (last 3 days): {recent_count} | Needs update: {total}")
+        self.stdout.write(f"Updating {total} manga (limited to 400 per run)")
 
         if total == 0:
-            self.stdout.write(self.style.SUCCESS("All manga already have ratings!"))
+            self.stdout.write(self.style.SUCCESS("All manga recently updated!"))
             return
 
-        # Limit to 150 per run for Railway free tier
-        manga_to_update = manga_to_update[:150]
+        # Limit to 400 per run for Railway free tier (fast operation)
+        manga_to_update = manga_to_update[:400]
 
         updated_count = 0
         failed_count = 0
@@ -163,8 +166,8 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(f"  ✗ No rating found on page"))
                     failed_count += 1
 
-                # Add delay to avoid overwhelming the server
-                time.sleep(0.5)
+                # Reduced delay since we're doing 400 per run
+                time.sleep(0.3)
 
             except Exception as e:
                 self.stdout.write(self.style.ERROR(f"  ✗ Error: {e}"))
@@ -174,4 +177,4 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Rating update complete!"))
         self.stdout.write(f"✓ Updated: {updated_count}")
         self.stdout.write(f"✗ Failed: {failed_count}")
-        self.stdout.write(f"⏱️  Remaining manga without rating: {max(0, total - 150)}")
+        self.stdout.write(f"⏱️  Remaining manga to update: {max(0, total - 400)}")
