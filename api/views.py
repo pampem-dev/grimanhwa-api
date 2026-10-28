@@ -615,3 +615,115 @@ def get_manga_from_db(request):
         })
     except Exception as e:
         return Response({"error": str(e)}, status=500)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def get_manga_details_db(request):
+    """Get manga details and chapters from database"""
+    from .models import Manga, Chapter
+
+    manga_id = request.GET.get("id")
+    if not manga_id:
+        return Response({"error": "Missing id parameter"}, status=400)
+
+    try:
+        # Get manga from database
+        manga = Manga.objects.get(url=manga_id)
+
+        # Get all chapters for this manga
+        chapters = Chapter.objects.filter(manga=manga).order_by('-number')
+
+        # Convert chapters to list
+        chapter_list = []
+        for chapter in chapters:
+            chapter_list.append({
+                'id': chapter.chapter_id,
+                'title': chapter.title,
+                'number': chapter.number,
+                'url': chapter.url,
+                'is_locked': chapter.is_locked,
+            })
+
+        return Response({
+            'id': manga.url,
+            'title': manga.title,
+            'url': manga.url,
+            'cover_url': manga.cover_url,
+            'rating': manga.rating,
+            'chapter_count': manga.chapter_count,
+            'status': manga.status,
+            'description': manga.description,
+            'alternative_titles': manga.alternative_titles,
+            'chapters': chapter_list,
+        })
+    except Manga.DoesNotExist:
+        return Response({"error": "Manga not found in database"}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def search_db(request):
+    """Search manga in database"""
+    from .models import Manga
+
+    query = request.GET.get("q", "").strip()
+    if not query:
+        return Response({"manga": []})
+
+    try:
+        # Search in title and alternative titles
+        queryset = Manga.objects.filter(
+            title__icontains=query
+        ) | Manga.objects.filter(
+            alternative_titles__icontains=query
+        )
+
+        # Convert to list
+        manga_list = []
+        for manga in queryset[:50]:  # Limit to 50 results
+            manga_list.append({
+                'id': manga.url,
+                'title': manga.title,
+                'url': manga.url,
+                'cover_url': manga.cover_url,
+                'rating': manga.rating,
+                'chapter_count': manga.chapter_count,
+                'status': manga.status,
+            })
+
+        return Response({"manga": manga_list})
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([])
+def get_latest_chapter_db(request):
+    """Get latest chapter from database"""
+    from .models import Manga, Chapter
+
+    manga_id = request.GET.get("id")
+    if not manga_id:
+        return Response({"error": "Missing id parameter"}, status=400)
+
+    try:
+        manga = Manga.objects.get(url=manga_id)
+        latest_chapter = Chapter.objects.filter(manga=manga).order_by('-number').first()
+
+        if latest_chapter:
+            return Response({
+                'chapter_id': latest_chapter.chapter_id,
+                'title': latest_chapter.title,
+                'number': latest_chapter.number,
+                'url': latest_chapter.url,
+                'is_locked': latest_chapter.is_locked,
+            })
+        else:
+            return Response({"error": "No chapters found"}, status=404)
+    except Manga.DoesNotExist:
+        return Response({"error": "Manga not found"}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
