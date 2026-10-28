@@ -28,6 +28,11 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'  # Default to True for local develo
 
 ALLOWED_HOSTS = ['*']
 
+# CSRF Trusted Origins for Railway
+CSRF_TRUSTED_ORIGINS = [
+    'https://grimanhwa-api-production.up.railway.app',
+]
+
 load_dotenv()
 
 # Application definition
