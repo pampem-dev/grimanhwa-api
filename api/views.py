@@ -727,32 +727,3 @@ def get_latest_chapter_db(request):
         return Response({"error": "Manga not found"}, status=404)
     except Exception as e:
         return Response({"error": str(e)}, status=500)
-
-
-@api_view(["GET"])
-@authentication_classes([])
-@permission_classes([])
-def get_pages_from_db(request):
-    """Get chapter pages from database"""
-    from .models import Chapter, Page
-
-    chapter_id = request.GET.get("id")
-    if not chapter_id:
-        return Response({"error": "Missing id parameter"}, status=400)
-
-    try:
-        chapter = Chapter.objects.get(chapter_id=chapter_id)
-        pages = Page.objects.filter(chapter=chapter).order_by('page_number')
-
-        page_list = []
-        for page in pages:
-            page_list.append({
-                'page_number': page.page_number,
-                'image_url': page.image_url
-            })
-
-        return Response({"pages": page_list})
-    except Chapter.DoesNotExist:
-        return Response({"error": "Chapter not found"}, status=404)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)

@@ -146,23 +146,3 @@ class Chapter(models.Model):
 
     def __str__(self):
         return f"{self.manga.title} - Chapter {self.number}"
-
-
-class Page(models.Model):
-    """Page model for storing chapter page URLs"""
-    chapter = models.ForeignKey(Chapter, on_delete=models.CASCADE, related_name='pages')
-    page_number = models.IntegerField()
-    image_url = models.URLField(max_length=1000)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = 'page'
-        verbose_name = 'Page'
-        verbose_name_plural = 'Pages'
-        ordering = ['page_number']
-        indexes = [
-            models.Index(fields=['chapter', 'page_number']),
-        ]
-
-    def __str__(self):
-        return f"{self.chapter.manga.title} - Chapter {self.chapter.number} - Page {self.page_number}"

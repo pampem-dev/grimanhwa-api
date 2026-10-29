@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import CustomUser, Manga, Chapter, Page
+from .models import CustomUser, Manga, Chapter
 
 # Register your models here.
 @admin.register(CustomUser)
@@ -56,19 +56,5 @@ class ChapterAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Basic Info', {'fields': ('manga', 'chapter_id', 'title', 'number')}),
         ('Details', {'fields': ('url', 'is_locked')}),
-        ('Timestamps', {'fields': ('created_at',)}),
-    )
-
-
-@admin.register(Page)
-class PageAdmin(admin.ModelAdmin):
-    list_display = ['chapter', 'page_number', 'image_url', 'created_at']
-    list_filter = ['created_at', 'chapter']
-    search_fields = ['chapter__title', 'image_url']
-    ordering = ['chapter', 'page_number']
-    readonly_fields = ['created_at']
-
-    fieldsets = (
-        ('Basic Info', {'fields': ('chapter', 'page_number', 'image_url')}),
         ('Timestamps', {'fields': ('created_at',)}),
     )
