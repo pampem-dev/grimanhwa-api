@@ -1368,14 +1368,15 @@ def manga_info(manga_id, batch_size=50, max_batches=20, force_refresh=False):
 
 # ... (rest of the code remains the same)
 
-# --- NEW: GLOBAL LOCK ---
-# This prevents multiple requests from spawning multiple Chrome instances
-# and crashing your Railway server (OOM 503 error).
+
 selenium_lock = threading.Lock()
 
-def chapter_pages(chapter_id):
+def chapter_pages(chapter_id, limit=None):
     if not chapter_id:
         return []
+
+    # If limit is specified, we'll return only that many pages
+    # This allows for faster initial load (first few pages)
 
     # Extract the base manga URL to track empty chapters
     import urllib.parse
@@ -1452,12 +1453,17 @@ def chapter_pages(chapter_id):
             # 4. Extraction
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             pages = extract_pages_from_soup(soup)
-            
+
             if not pages:
                 pages = extract_pages_fallback(soup)
-            
+
             print(f"DEBUG: Successfully found {len(pages)} images")
-            
+
+            # Apply limit if specified
+            if limit and len(pages) > limit:
+                pages = pages[:limit]
+                print(f"DEBUG: Limited to first {limit} pages")
+
             # If no pages found, mark this manga as having reached the end
             if len(pages) == 0:
                 print(f"DEBUG: Marking manga {base_url} as reached end (0 pages found)")

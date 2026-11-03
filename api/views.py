@@ -147,9 +147,12 @@ def kaynscan_latest_chapter_view(request):
 @authentication_classes([])
 @permission_classes([])
 def kaynscan_chapter_pages_view(request, chapter_id):
-    """Get chapter pages from Kaynscan"""
+    """Get chapter pages from Kaynscan with optional limit for chunked loading"""
     try:
-        pages = kaynscan_chapter_pages(chapter_id)
+        limit = request.GET.get('limit')
+        if limit:
+            limit = int(limit)
+        pages = kaynscan_chapter_pages(chapter_id, limit=limit)
         return Response({"pages": pages})
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)
