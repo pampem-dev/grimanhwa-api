@@ -1390,10 +1390,11 @@ def chapter_pages(chapter_id, limit=None):
 
     # 1. Cache Check (Outside the lock for speed)
     current_time = time.time()
-    if chapter_id in _chapter_cache:
-        cached_data, cached_time = _chapter_cache[chapter_id]
+    cache_key = f"{chapter_id}_limit_{limit}" if limit else chapter_id
+    if cache_key in _chapter_cache:
+        cached_data, cached_time = _chapter_cache[cache_key]
         if current_time - cached_time < _cache_timeout:
-            print(f"DEBUG: Cache hit for {chapter_id}")
+            print(f"DEBUG: Cache hit for {cache_key}")
             return cached_data
 
     # 2. Sequential Execution with Lock
@@ -1475,7 +1476,7 @@ def chapter_pages(chapter_id, limit=None):
                     print(f"DEBUG: Removing manga {base_url} from empty list - chapter found")
                     _empty_chapters_found.remove(base_url)
 
-            _chapter_cache[chapter_id] = (pages, current_time)
+            _chapter_cache[cache_key] = (pages, current_time)
             return pages
 
         except Exception as e:
