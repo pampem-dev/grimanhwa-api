@@ -40,9 +40,10 @@ class Command(BaseCommand):
                 return
             manga_list = [manga]
         else:
-            # Get manga by priority status
+            # Get manga by priority status (case-insensitive)
+            status_filter_lower = [s.lower() for s in status_filter]
             manga_list = Manga.objects.filter(
-                status__in=status_filter
+                status__in=status_filter_lower
             ).order_by('last_updated')[:limit]
 
             if not manga_list.exists():
