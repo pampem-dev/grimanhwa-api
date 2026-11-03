@@ -18,8 +18,8 @@ class Command(BaseCommand):
         parser.add_argument(
             '--status',
             type=str,
-            default='Ongoing,Hiatus',
-            help='Comma-separated list of statuses to prioritize (default: Ongoing,Hiatus)'
+            default='Ongoing,Hiatus,Completed',
+            help='Comma-separated list of statuses to prioritize (default: Ongoing,Hiatus,Completed)'
         )
         parser.add_argument(
             '--manga-id',
