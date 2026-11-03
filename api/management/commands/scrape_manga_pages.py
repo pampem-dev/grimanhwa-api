@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from api.models import Manga, Chapter, Page
-from api.sites.kaynscan import kaynscan_chapter_pages
+from api.sites.kaynscan import chapter_pages
 import time
 
 
@@ -78,7 +78,7 @@ class Command(BaseCommand):
                 self.stdout.write(f'  → Scraping Chapter {chapter.number}...')
                 try:
                     # Scrape pages
-                    pages_data = kaynscan_chapter_pages(chapter.url)
+                    pages_data = chapter_pages(chapter.url)
 
                     if pages_data and len(pages_data) > 0:
                         # Save pages to database
