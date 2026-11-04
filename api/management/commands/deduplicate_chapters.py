@@ -55,10 +55,11 @@ class Command(BaseCommand):
 
             # Keep the most recent one (first in list)
             to_keep = chapters.first()
-            to_delete = chapters[1:]
+            # Delete all except the one we're keeping
+            to_delete = chapters.exclude(id=to_keep.id)
 
             if dry_run:
-                self.stdout.write(f'  [DRY RUN] Would delete {len(to_delete)} duplicates, keeping ID {to_keep.id}')
+                self.stdout.write(f'  [DRY RUN] Would delete {to_delete.count()} duplicates, keeping ID {to_keep.id}')
             else:
                 # Delete duplicates
                 deleted_count, _ = to_delete.delete()
