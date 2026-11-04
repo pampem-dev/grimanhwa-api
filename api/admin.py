@@ -47,14 +47,19 @@ class MangaAdmin(admin.ModelAdmin):
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):
-    list_display = ['manga', 'number', 'title', 'is_locked', 'created_at']
+    list_display = ['manga', 'number', 'title', 'is_locked', 'pages_count', 'created_at']
     list_filter = ['is_locked', 'created_at', 'manga']
     search_fields = ['title', 'chapter_id', 'manga__title']
     ordering = ['-manga', '-number']
-    readonly_fields = ['created_at']
+    readonly_fields = ['created_at', 'pages_count']
 
     fieldsets = (
         ('Basic Info', {'fields': ('manga', 'chapter_id', 'title', 'number')}),
         ('Details', {'fields': ('url', 'is_locked')}),
+        ('Pages', {'fields': ('pages', 'pages_scraped_at')}),
         ('Timestamps', {'fields': ('created_at',)}),
     )
+
+    def pages_count(self, obj):
+        return len(obj.pages) if obj.pages else 0
+    pages_count.short_description = 'Pages Count'
