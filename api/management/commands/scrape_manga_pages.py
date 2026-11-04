@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from api.models import Manga, Chapter, Page
+from api.models import Manga, Chapter
 from api.sites.kaynscan import chapter_pages
 import time
 
@@ -69,10 +69,9 @@ class Command(BaseCommand):
             error_count = 0
 
             for chapter in chapters:
-                # Check if pages already exist
-                existing_pages = Page.objects.filter(chapter=chapter).count()
-                if existing_pages > 0:
-                    self.stdout.write(f'  ✓ Chapter {chapter.number}: Already has {existing_pages} pages (skipped)')
+                # Check if pages already exist in JSONField
+                if chapter.pages and len(chapter.pages) > 0:
+                    self.stdout.write(f'  ✓ Chapter {chapter.number}: Already has {len(chapter.pages)} pages (skipped)')
                     skipped_count += 1
                     continue
 
@@ -82,13 +81,10 @@ class Command(BaseCommand):
                     pages_data = chapter_pages(chapter.url)
 
                     if pages_data and len(pages_data) > 0:
-                        # Save pages to database
-                        for idx, page_url in enumerate(pages_data):
-                            Page.objects.get_or_create(
-                                chapter=chapter,
-                                page_number=idx,
-                                defaults={'image_url': page_url}
-                            )
+                        # Save pages to chapter's JSONField
+                        chapter.pages = pages_data
+                        chapter.pages_scraped_at = timezone.now()
+                        chapter.save()
 
                         self.stdout.write(self.style.SUCCESS(f'    ✓ Saved {len(pages_data)} pages'))
                         processed_count += 1
