@@ -1,7 +1,11 @@
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from django.db.models import Q
+
 from api.models import Manga, Chapter
 from api.sites.kaynscan import chapter_pages
+
 import time
 
 
@@ -19,7 +23,7 @@ class Command(BaseCommand):
             '--status',
             type=str,
             default='Ongoing,Hiatus,Completed',
-            help='Comma-separated list of statuses to prioritize (default: Ongoing,Hiatus,Completed)'
+            help='Comma-separated list of statuses to prioritize'
         )
         parser.add_argument(
             '--manga-id',
@@ -29,84 +33,125 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         limit = options['limit']
-        status_filter = options.get('status', 'Ongoing,Hiatus').split(',')
+        status_filter = options['status'].split(',')
         manga_id = options.get('manga_id')
 
         if manga_id:
-            # Process specific manga
             manga = Manga.objects.filter(url=manga_id).first()
+
             if not manga:
-                self.stdout.write(self.style.ERROR(f'Manga not found: {manga_id}'))
+                self.stdout.write(
+                    self.style.ERROR(f'Manga not found: {manga_id}')
+                )
                 return
+
             manga_list = [manga]
+
         else:
-            # Get manga by priority status (case-insensitive)
-            status_filter_lower = [s.lower() for s in status_filter]
+            status_filter_lower = [
+                status.strip().lower()
+                for status in status_filter
+            ]
+
             manga_list = Manga.objects.filter(
                 status__in=status_filter_lower
             ).order_by('last_updated')[:limit]
 
             if not manga_list.exists():
-                self.stdout.write(self.style.WARNING(f'No manga found with status: {status_filter}'))
+                self.stdout.write(
+                    self.style.WARNING(
+                        f'No manga found with status: {status_filter}'
+                    )
+                )
                 return
 
-        self.stdout.write(self.style.SUCCESS(f'Processing {len(manga_list)} manga(s)...'))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f'Processing {len(manga_list)} manga(s)...'
+            )
+        )
 
         for manga in manga_list:
-            self.stdout.write(f'\n{"="*60}')
-            self.stdout.write(self.style.SUCCESS(f'Processing: {manga.title}'))
+            self.stdout.write(f'\n{"=" * 60}')
+            self.stdout.write(
+                self.style.SUCCESS(f'Processing: {manga.title}')
+            )
             self.stdout.write(f'Status: {manga.status}')
             self.stdout.write(f'Chapter count: {manga.chapter_count}')
-            self.stdout.write(f'{"="*60}')
+            self.stdout.write(f'{"=" * 60}')
 
-            # Get all chapters for this manga
-            chapters = Chapter.objects.filter(manga=manga).order_by('-number')
+            # Only retrieve chapters that have not been scraped yet.
+            # Exclude chapters that already contain page URLs.
+            chapters = Chapter.objects.filter(
+                manga=manga
+            ).filter(
+                Q(pages__isnull=True) | Q(pages=[])
+            ).order_by('-number')
+
             total_chapters = chapters.count()
-            self.stdout.write(f'Found {total_chapters} chapters')
+
+            self.stdout.write(
+                f'Chapters needing page scraping: {total_chapters}'
+            )
 
             processed_count = 0
             skipped_count = 0
             error_count = 0
 
-            for chapter in chapters:
-                # Check if pages already exist in JSONField
-                if chapter.pages and len(chapter.pages) > 0:
-                    self.stdout.write(f'  ✓ Chapter {chapter.number}: Already has {len(chapter.pages)} pages (skipped)')
-                    skipped_count += 1
-                    continue
+            for chapter in chapters.iterator(chunk_size=10):
+                self.stdout.write(
+                    f'  → Scraping Chapter {chapter.number}...'
+                )
 
-                self.stdout.write(f'  → Scraping Chapter {chapter.number}...')
                 try:
-                    # Scrape pages
                     pages_data = chapter_pages(chapter.url)
 
-                    if pages_data and len(pages_data) > 0:
-                        # Save pages to chapter's JSONField
+                    if pages_data:
                         chapter.pages = pages_data
                         chapter.pages_scraped_at = timezone.now()
-                        chapter.save()
 
-                        self.stdout.write(self.style.SUCCESS(f'    ✓ Saved {len(pages_data)} pages'))
+                        chapter.save(
+                            update_fields=[
+                                'pages',
+                                'pages_scraped_at'
+                            ]
+                        )
+
+                        self.stdout.write(
+                            self.style.SUCCESS(
+                                f'    ✓ Saved {len(pages_data)} pages'
+                            )
+                        )
+
                         processed_count += 1
+
                     else:
-                        self.stdout.write(self.style.WARNING(f'    ⚠ No pages found'))
+                        self.stdout.write(
+                            self.style.WARNING(
+                                '    ⚠ No pages found'
+                            )
+                        )
                         error_count += 1
 
-                    # Small delay to avoid overwhelming the server
                     time.sleep(0.5)
 
                 except Exception as e:
-                    self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f'    ✗ Error: {str(e)}'
+                        )
+                    )
                     error_count += 1
                     continue
 
-            # Update manga last_updated timestamp
             manga.last_updated = timezone.now()
-            manga.save()
+            manga.save(update_fields=['last_updated'])
 
             self.stdout.write(f'\n{manga.title} complete:')
             self.stdout.write(f'  Processed: {processed_count} chapters')
             self.stdout.write(f'  Skipped: {skipped_count} chapters')
             self.stdout.write(f'  Errors: {error_count} chapters')
 
-        self.stdout.write(self.style.SUCCESS('\n✓ All done!'))
+        self.stdout.write(
+            self.style.SUCCESS('\n✓ All done!')
+        )
