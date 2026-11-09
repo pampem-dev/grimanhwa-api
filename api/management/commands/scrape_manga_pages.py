@@ -48,16 +48,19 @@ class Command(BaseCommand):
             manga_list = [manga]
 
         else:
-            status_filter_lower = [
-                status.strip().lower()
-                for status in status_filter
-            ]
+            status_query = Q()
+
+            for status in status_filter:
+                status = status.strip()
+
+                if status:
+                    status_query |= Q(status__iexact=status)
 
             manga_list = Manga.objects.filter(
-                status__in=status_filter_lower
+                status_query
             ).order_by('last_updated')[:limit]
 
-            if not manga_list.exists():
+            if not manga_list:
                 self.stdout.write(
                     self.style.WARNING(
                         f'No manga found with status: {status_filter}'
@@ -81,7 +84,6 @@ class Command(BaseCommand):
             self.stdout.write(f'{"=" * 60}')
 
             # Only retrieve chapters that have not been scraped yet.
-            # Exclude chapters that already contain page URLs.
             chapters = Chapter.objects.filter(
                 manga=manga
             ).filter(
