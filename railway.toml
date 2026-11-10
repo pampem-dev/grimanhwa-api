@@ -12,6 +12,10 @@ schedule = "0 0 * * *"
 command = "python manage.py update_chapter_counts"
 
 [[cron]]
+schedule = "30 0 * * *"
+command = "python manage.py scrape_manga_pages --limit 100"
+
+[[cron]]
 schedule = "0 3 * * *"
 command = "python manage.py update_ratings"
 
@@ -20,9 +24,21 @@ schedule = "0 6 * * *"
 command = "python manage.py update_chapter_counts"
 
 [[cron]]
+schedule = "30 6 * * *"
+command = "python manage.py scrape_manga_pages --limit 100"
+
+[[cron]]
 schedule = "0 12 * * *"
 command = "python manage.py update_chapter_counts"
 
 [[cron]]
+schedule = "30 12 * * *"
+command = "python manage.py scrape_manga_pages --limit 100"
+
+[[cron]]
 schedule = "0 18 * * *"
 command = "python manage.py update_chapter_counts"
+
+[[cron]]
+schedule = "30 18 * * *"
+command = "python manage.py scrape_manga_pages --limit 100"

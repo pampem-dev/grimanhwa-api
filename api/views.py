@@ -147,13 +147,35 @@ def kaynscan_latest_chapter_view(request):
 @authentication_classes([])
 @permission_classes([])
 def kaynscan_chapter_pages_view(request, chapter_id):
-    """Get chapter pages from Kaynscan with optional limit for chunked loading"""
+    """Get chapter pages from the database, scraping and caching only if missing"""
     try:
         limit = request.GET.get('limit')
         if limit:
             limit = int(limit)
-        pages = kaynscan_chapter_pages(chapter_id, limit=limit)
-        return Response({"pages": pages})
+
+        from .models import Chapter
+        from django.db.models import Q
+
+        chapter = Chapter.objects.filter(
+            Q(chapter_id=chapter_id) | Q(url=chapter_id)
+        ).first()
+
+        pages = None
+        if chapter and chapter.pages:
+            pages = chapter.pages
+        else:
+            # Scrape once without limit, persist full result, then slice below
+            scrape_url = (chapter.url if chapter and chapter.url else chapter_id)
+            pages = kaynscan_chapter_pages(scrape_url)
+            if chapter and pages:
+                chapter.pages = pages
+                chapter.pages_scraped_at = timezone.now()
+                chapter.save(update_fields=['pages', 'pages_scraped_at'])
+
+        if limit and pages:
+            pages = pages[:limit]
+
+        return Response({"pages": pages or []})
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)
 
