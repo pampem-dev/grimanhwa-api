@@ -124,6 +124,10 @@ def kaynscan_manga_info_view(request):
 
     try:
         chapters = kaynscan_manga_info_func(manga_id, force_refresh=force_refresh)
+        if isinstance(chapters, dict):
+            chapters.setdefault('id', manga_id)
+            chapters.setdefault('url', manga_id)
+            chapters.setdefault('cover_url', chapters.get('cover', ''))
         return Response(chapters)
     except Exception as e:
         return Response({"error": "Scraper failed", "details": str(e)}, status=503)

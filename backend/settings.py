@@ -16,6 +16,7 @@ import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+load_dotenv()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -33,7 +34,6 @@ CSRF_TRUSTED_ORIGINS = [
     'https://grimanhwa-api-production.up.railway.app',
 ]
 
-load_dotenv()
 
 # Application definition
 
@@ -87,7 +87,6 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 # Try to use PostgreSQL if DATABASE_URL is set (Railway), otherwise use SQLite (local dev)
-import os
 
 if os.getenv('DATABASE_URL'):
     import dj_database_url
