@@ -504,11 +504,24 @@ def get_all_browse_manga(save_to_db=True, create_only=False):
             if create_only:
                 # Only create new manga, don't update existing
                 from api.models import Manga
-                existing_urls = set(Manga.objects.values_list('url', flat=True))
+                # Normalize URLs for comparison (remove trailing slashes, ensure consistent scheme)
+                def normalize_url(url):
+                    if not url:
+                        return url
+                    url = url.rstrip('/')
+                    # Ensure consistent scheme (https)
+                    if url.startswith('http://'):
+                        url = url.replace('http://', 'https://', 1)
+                    return url
+                
+                existing_urls = set()
+                for url in Manga.objects.values_list('url', flat=True):
+                    existing_urls.add(normalize_url(url))
                 
                 for manga_data in unique_manga:
                     url = manga_data.get('url') or manga_data.get('id')
-                    if url and url not in existing_urls:
+                    normalized_url = normalize_url(url)
+                    if normalized_url and normalized_url not in existing_urls:
                         try:
                             title = manga_data.get('title', '')[:500]
                             cover_url = (manga_data.get('cover_url') or manga_data.get('cover', ''))[:1000]
