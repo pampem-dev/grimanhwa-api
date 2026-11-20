@@ -21,7 +21,7 @@ class Command(BaseCommand):
             mangas = Manga.objects.filter(title__iexact=title_lower).order_by('id')
             
             # Filter to only those with 0 chapters
-            zero_chapter_mangas = mangas.annotate(real_chapter_count=Count('chapter')).filter(real_chapter_count=0)
+            zero_chapter_mangas = mangas.filter(chapter_count=0)
             
             # If all have 0 chapters, keep the first one
             if zero_chapter_mangas.count() == mangas.count():
