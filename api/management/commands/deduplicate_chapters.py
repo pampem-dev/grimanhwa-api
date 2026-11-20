@@ -23,8 +23,8 @@ class Command(BaseCommand):
         dry_run = options.get('dry_run')
 
         # Build query - find manga+chapter_number combos with duplicates
-        # Only consider chapters with no pages as duplicates
-        queryset = Chapter.objects.filter(pages__isnull=True).values('manga', 'number').annotate(
+        # Only consider chapters with empty pages list as duplicates
+        queryset = Chapter.objects.filter(pages=[]).values('manga', 'number').annotate(
             count=Count('id')
         ).filter(count__gt=1)
 
@@ -50,8 +50,8 @@ class Command(BaseCommand):
             all_chapters = Chapter.objects.filter(manga_id=manga_id, number=chapter_number).order_by('-created_at')
 
             # Separate chapters with pages vs without pages
-            chapters_with_pages = all_chapters.exclude(pages__isnull=True)
-            chapters_without_pages = all_chapters.filter(pages__isnull=True)
+            chapters_with_pages = all_chapters.exclude(pages=[])
+            chapters_without_pages = all_chapters.filter(pages=[])
 
             if not chapters_without_pages.exists():
                 continue
