@@ -757,7 +757,7 @@ def search_db(request):
 @authentication_classes([])
 @permission_classes([])
 def get_latest_chapter_db(request):
-    """Get latest chapter from database"""
+    """Get latest 2 chapters from database"""
     from .models import Manga, Chapter
 
     manga_id = request.GET.get("id")
@@ -766,147 +766,24 @@ def get_latest_chapter_db(request):
 
     try:
         manga = Manga.objects.get(url=manga_id)
-        latest_chapter = Chapter.objects.filter(manga=manga).order_by('-number').first()
+        latest_chapters = Chapter.objects.filter(manga=manga).order_by('-number')[:2]
 
-        if latest_chapter:
+        if latest_chapters:
+            chapters_list = []
+            for chapter in latest_chapters:
+                chapters_list.append({
+                    'chapter_id': chapter.chapter_id,
+                    'title': chapter.title,
+                    'number': chapter.number,
+                    'url': chapter.url,
+                    'is_locked': chapter.is_locked,
+                })
             return Response({
-                'chapter_id': latest_chapter.chapter_id,
-                'title': latest_chapter.title,
-                'number': latest_chapter.number,
-                'url': latest_chapter.url,
-                'is_locked': latest_chapter.is_locked,
+                'chapters': chapters_list
             })
         else:
             return Response({"error": "No chapters found"}, status=404)
     except Manga.DoesNotExist:
         return Response({"error": "Manga not found"}, status=404)
-    except Exception as e:
-        return Response({"error": str(e)}, status=500)
-
-@api_view(["GET"])
-@authentication_classes([])
-@permission_classes([])
-def get_latest_updates_db(request):
-    """Get manga sorted by most recent chapter update (parsed from title)"""
-    from .models import Manga, Chapter
-    from django.db.models import Prefetch
-    from django.utils import timezone
-    import re
-    from datetime import datetime, timedelta
-
-    def parse_date_from_title(title):
-        """Parse date from chapter title like 'Chapter313 weeks ago' or 'Chapter1Oct 2, 2022'"""
-        if not title:
-            return None
-
-        title_lower = title.lower()
-        now = timezone.now()
-
-        # Pattern: "just now" or "now"
-        if 'just now' in title_lower or re.search(r'\bnow\b', title_lower):
-            return now
-
-        # Pattern: "today"
-        if 'today' in title_lower:
-            return now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Pattern: "yesterday"
-        if 'yesterday' in title_lower:
-            return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Pattern: "X hours ago", "X days ago", "X weeks ago", "X months ago"
-        ago_match = re.search(r'(\d+)\s*(hour|day|week|month)s?\s+ago', title_lower)
-        if ago_match:
-            amount = int(ago_match.group(1))
-            unit = ago_match.group(2)
-
-            if unit == 'hour':
-                return now - timedelta(hours=amount)
-            elif unit == 'day':
-                return now - timedelta(days=amount)
-            elif unit == 'week':
-                return now - timedelta(weeks=amount)
-            elif unit == 'month':
-                return now - timedelta(days=amount * 30)  # Approximate
-
-        # Pattern: "Oct 2, 2022" or "October 2, 2022"
-        date_match = re.search(r'(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})', title_lower)
-        if date_match:
-            month_str = date_match.group(1)
-            day = int(date_match.group(2))
-            year = int(date_match.group(3))
-
-            month_map = {
-                'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-                'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-            }
-            month = month_map.get(month_str[:3], 1)
-
-            try:
-                return timezone.make_aware(datetime(year, month, day))
-            except:
-                return None
-
-        return None
-
-    try:
-        # Get all manga with chapters
-        manga_list = Manga.objects.prefetch_related(
-            Prefetch(
-                'chapters',
-                queryset=Chapter.objects.order_by('-number')[:1],  # Get latest chapter by number
-                to_attr='latest_chapter'
-            )
-        ).filter(chapters__isnull=False).distinct()
-
-        # Sort by parsed date from chapter title
-        def get_sort_date(manga):
-            if manga.latest_chapter:
-                chapter = manga.latest_chapter[0]
-                # Try to parse date from title
-                parsed_date = parse_date_from_title(chapter.title)
-                if parsed_date:
-                    return parsed_date
-                # If can't parse date, return very old date (goes to bottom)
-                return timezone.now() - timedelta(days=36500)
-            return timezone.now() - timedelta(days=36500)
-
-        manga_list = sorted(manga_list, key=get_sort_date, reverse=True)
-
-        # Apply pagination
-        page = int(request.GET.get('page', 1))
-        per_page = int(request.GET.get('per_page', 20))
-        start = (page - 1) * per_page
-        end = start + per_page
-
-        paginated_manga = manga_list[start:end]
-
-        result = []
-        for manga in paginated_manga:
-            latest_chapter = manga.latest_chapter[0] if manga.latest_chapter else None
-            result.append({
-                'id': manga.url,
-                'title': manga.title,
-                'url': manga.url,
-                'cover_url': manga.cover_url,
-                'rating': manga.rating,
-                'chapter_count': manga.chapter_count,
-                'status': manga.status,
-                'latest_chapter': {
-                    'chapter_id': latest_chapter.chapter_id if latest_chapter else None,
-                    'title': latest_chapter.title if latest_chapter else None,
-                    'number': latest_chapter.number if latest_chapter else None,
-                    'url': latest_chapter.url if latest_chapter else None,
-                    'created_at': latest_chapter.created_at.isoformat() if latest_chapter else None,
-                } if latest_chapter else None
-            })
-
-        return Response({
-            "manga": result,
-            "total": len(manga_list),
-            "page": page,
-            "per_page": per_page,
-            "total_pages": (len(manga_list) + per_page - 1) // per_page
-        })
     except Exception as e:
         return Response({"error": str(e)}, status=500)
