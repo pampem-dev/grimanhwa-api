@@ -25,6 +25,8 @@ class CustomUser(AbstractUser):
     reading_days = models.JSONField(default=list, blank=True)
     # Last streak update
     last_streak_update = models.DateTimeField(null=True, blank=True)
+    # Read chapters data (manga_id -> array of chapter IDs)
+    read_chapters = models.JSONField(default=dict, blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']

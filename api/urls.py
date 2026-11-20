@@ -22,6 +22,7 @@ urlpatterns = [
     path('user/library/', views.add_to_library),
     path('user/library/get/', views.get_library),
     path('user/sync/', views.sync_user_data),
+    path('user/read-chapters/get/', views.get_read_chapters),
     path('user-count/', views.user_count),
     path('manga-db/', views.get_manga_from_db),
     path('manga-db/details/', views.get_manga_details_db),

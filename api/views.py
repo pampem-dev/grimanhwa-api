@@ -425,10 +425,11 @@ def get_library(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def sync_user_data(request):
-    """Sync user's reading history and library from localStorage to database"""
+    """Sync user's reading history, library, and read chapters from localStorage to database"""
     user = request.user
     history = request.data.get('history', [])
     library = request.data.get('library', [])
+    read_chapters = request.data.get('readChapters', {})
 
     # Merge history - avoid duplicates by mangaId (camelCase from frontend)
     if not user.reading_history:
@@ -448,6 +449,21 @@ def sync_user_data(request):
     # Merge library - store full objects instead of just IDs
     if not user.library:
         user.library = []
+
+    # Merge read chapters data
+    if not user.read_chapters:
+        user.read_chapters = {}
+
+    # Update read chapters for each manga
+    for manga_id, chapters in read_chapters.items():
+        if manga_id not in user.read_chapters:
+            user.read_chapters[manga_id] = []
+        # Merge chapter IDs (avoid duplicates)
+        existing = set(user.read_chapters[manga_id])
+        for chapter_id in chapters:
+            if chapter_id not in existing:
+                user.read_chapters[manga_id].append(chapter_id)
+                existing.add(chapter_id)
 
     # Get IDs from incoming library
     incoming_ids = set()
@@ -561,7 +577,17 @@ def sync_user_data(request):
         "total_history": len(user.reading_history),
         "total_library": len(user.library),
         "total_read": user.total_read_count,
-        "reading_streak": user.reading_streak
+        "reading_streak": user.reading_streak,
+        "read_chapters_count": sum(len(chapters) for chapters in user.read_chapters.values())
+    })
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_read_chapters(request):
+    """Get user's read chapters data"""
+    user = request.user
+    return Response({
+        "read_chapters": user.read_chapters or {}
     })
 
 @api_view(["GET"])
