@@ -22,8 +22,9 @@ class Command(BaseCommand):
         manga_id = options.get('manga_id')
         dry_run = options.get('dry_run')
 
-        # Build query
-        queryset = Chapter.objects.values('manga', 'number').annotate(
+        # Build query - find manga+chapter_number combos with duplicates
+        # Only consider chapters with no pages as duplicates
+        queryset = Chapter.objects.filter(pages__isnull=True).values('manga', 'number').annotate(
             count=Count('id')
         ).filter(count__gt=1)
 
@@ -36,7 +37,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('No duplicate chapters found'))
             return
 
-        self.stdout.write(f'Found {len(duplicates)} manga with duplicate chapters')
+        self.stdout.write(f'Found {len(duplicates)} manga+chapter combos with duplicate empty chapters')
 
         total_deleted = 0
 
@@ -46,25 +47,39 @@ class Command(BaseCommand):
             count = dup['count']
 
             # Get all chapters for this manga+number combination
-            chapters = Chapter.objects.filter(manga_id=manga_id, number=chapter_number).order_by('-created_at')
+            all_chapters = Chapter.objects.filter(manga_id=manga_id, number=chapter_number).order_by('-created_at')
 
-            self.stdout.write(f'\nManga ID: {manga_id}, Chapter {chapter_number} ({count} duplicates):')
-            for ch in chapters:
-                pages_info = f"has {len(ch.pages)} pages" if ch.pages else "no pages"
-                self.stdout.write(f'  - ID: {ch.id}, URL: {ch.chapter_id}, Created: {ch.created_at}, {pages_info}')
+            # Separate chapters with pages vs without pages
+            chapters_with_pages = all_chapters.exclude(pages__isnull=True)
+            chapters_without_pages = all_chapters.filter(pages__isnull=True)
 
-            # Keep the most recent one (first in list)
-            to_keep = chapters.first()
-            # Delete all except the one we're keeping
-            to_delete = chapters.exclude(id=to_keep.id)
+            if not chapters_without_pages.exists():
+                continue
+
+            self.stdout.write(f'\nManga ID: {manga_id}, Chapter {chapter_number}:')
+            self.stdout.write(f'  Chapters with pages: {chapters_with_pages.count()}')
+            self.stdout.write(f'  Chapters without pages: {chapters_without_pages.count()}')
+
+            # If there's a chapter with pages, delete all without pages
+            if chapters_with_pages.exists():
+                to_keep = chapters_with_pages.first()
+                to_delete = chapters_without_pages
+                self.stdout.write(f'  Keeping chapter with pages (ID: {to_keep.id})')
+            else:
+                # All have no pages - keep the most recent one
+                to_keep = all_chapters.first()
+                to_delete = all_chapters.exclude(id=to_keep.id)
+                self.stdout.write(f'  All have no pages - keeping most recent (ID: {to_keep.id})')
+
+            self.stdout.write(f'  Deleting {to_delete.count()} duplicate chapters')
 
             if dry_run:
-                self.stdout.write(f'  [DRY RUN] Would delete {to_delete.count()} duplicates, keeping ID {to_keep.id}')
+                self.stdout.write(f'  [DRY RUN] Would delete {to_delete.count()} duplicates')
             else:
                 # Delete duplicates
                 deleted_count, _ = to_delete.delete()
                 total_deleted += deleted_count
-                self.stdout.write(self.style.SUCCESS(f'  ✓ Deleted {deleted_count} duplicates, kept ID {to_keep.id}'))
+                self.stdout.write(self.style.SUCCESS(f'  ✓ Deleted {deleted_count} duplicates'))
 
         if dry_run:
             self.stdout.write(f'\n[DRY RUN] Total that would be deleted: {sum(d["count"] - 1 for d in duplicates)}')
