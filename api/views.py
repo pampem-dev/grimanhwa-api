@@ -790,6 +790,7 @@ def get_latest_updates_db(request):
     """Get manga sorted by most recent chapter update (parsed from title)"""
     from .models import Manga, Chapter
     from django.db.models import Prefetch
+    from django.utils import timezone
     import re
     from datetime import datetime, timedelta
 
@@ -806,7 +807,7 @@ def get_latest_updates_db(request):
             amount = int(ago_match.group(1))
             unit = ago_match.group(2)
 
-            now = datetime.now()
+            now = timezone.now()
             if unit == 'hour':
                 return now - timedelta(hours=amount)
             elif unit == 'day':
@@ -830,7 +831,7 @@ def get_latest_updates_db(request):
             month = month_map.get(month_str[:3], 1)
 
             try:
-                return datetime(year, month, day)
+                return timezone.make_aware(datetime(year, month, day))
             except:
                 return None
 
@@ -856,7 +857,7 @@ def get_latest_updates_db(request):
                     return parsed_date
                 # Fallback to created_at if no date in title
                 return chapter.created_at
-            return datetime.min
+            return timezone.now() - timedelta(days=36500)  # Very old date
 
         manga_list = sorted(manga_list, key=get_sort_date, reverse=True)
 
