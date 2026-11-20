@@ -25,15 +25,15 @@ class Command(BaseCommand):
             
             # If all have 0 chapters, keep the first one
             if zero_chapter_mangas.count() == mangas.count():
-                to_delete = zero_chapter_mangas[1:]  # Keep first, delete rest
+                # Keep first, delete rest - get IDs to avoid limit/offset issue
+                to_delete_ids = list(zero_chapter_mangas.values_list('id', flat=True)[1:])
             else:
                 # Only delete the zero-chapter ones (keep the ones with chapters)
-                to_delete = zero_chapter_mangas
+                to_delete_ids = list(zero_chapter_mangas.values_list('id', flat=True))
             
-            count = to_delete.count()
-            if count > 0:
-                to_delete.delete()
-                deleted_count += count
-                self.stdout.write(f'  Removed {count} duplicate(s) with 0 chapters for: {mangas.first().title[:50]}...')
+            if to_delete_ids:
+                Manga.objects.filter(id__in=to_delete_ids).delete()
+                deleted_count += len(to_delete_ids)
+                self.stdout.write(f'  Removed {len(to_delete_ids)} duplicate(s) with 0 chapters for: {mangas.first().title[:50]}...')
         
         self.stdout.write(self.style.SUCCESS(f'\nRemoved {deleted_count} manga that were duplicates AND had 0 chapters'))
