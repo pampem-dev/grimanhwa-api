@@ -28,4 +28,5 @@ urlpatterns = [
     path('manga-db/details/', views.get_manga_details_db),
     path('manga-db/search/', views.search_db),
     path('manga-db/latest-chapter/', views.get_latest_chapter_db),
+    path('manga-db/latest-updates/', views.get_latest_updates_db),
 ]
