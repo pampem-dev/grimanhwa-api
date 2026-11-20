@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Count
+from django.db.models.functions import Lower
 from api.models import Manga, Chapter
 
 
@@ -10,14 +11,14 @@ class Command(BaseCommand):
         self.stdout.write('Starting cleanup...')
         self.stdout.write('Removing manga that are BOTH duplicates AND have 0 chapters...')
         
-        # Find duplicates by URL
-        url_duplicates = Manga.objects.values('url').annotate(count=Count('id')).filter(count__gt=1)
+        # Find duplicates by title (case-insensitive)
+        title_duplicates = Manga.objects.annotate(title_lower=Lower('title')).values('title_lower').annotate(count=Count('id')).filter(count__gt=1)
         
         deleted_count = 0
-        for duplicate in url_duplicates:
-            url = duplicate['url']
-            # Get all manga with this URL, ordered by id
-            mangas = Manga.objects.filter(url=url).order_by('id')
+        for duplicate in title_duplicates:
+            title_lower = duplicate['title_lower']
+            # Get all manga with this title, ordered by id
+            mangas = Manga.objects.filter(title__iexact=title_lower).order_by('id')
             
             # Filter to only those with 0 chapters
             zero_chapter_mangas = mangas.annotate(chapter_count=Count('chapter')).filter(chapter_count=0)
@@ -33,6 +34,6 @@ class Command(BaseCommand):
             if count > 0:
                 to_delete.delete()
                 deleted_count += count
-                self.stdout.write(f'  Removed {count} duplicate(s) with 0 chapters for: {url[:50]}...')
+                self.stdout.write(f'  Removed {count} duplicate(s) with 0 chapters for: {mangas.first().title[:50]}...')
         
         self.stdout.write(self.style.SUCCESS(f'\nRemoved {deleted_count} manga that were duplicates AND had 0 chapters'))
