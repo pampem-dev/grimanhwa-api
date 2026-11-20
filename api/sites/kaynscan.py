@@ -411,8 +411,13 @@ def extract_manga_data_from_item(item, base_url):
 
     return None
 
-def get_all_browse_manga():
-    """Get all manga from all browse pages - OPTIMIZED"""
+def get_all_browse_manga(save_to_db=True, create_only=False):
+    """Get all manga from all browse pages - OPTIMIZED
+    
+    Args:
+        save_to_db: If True, save/update manga to database
+        create_only: If True, only create new manga (don't update existing)
+    """
     # Check cache first
     cache_key = "all_browse_manga"
     current_time = time.time()
@@ -495,15 +500,46 @@ def get_all_browse_manga():
         # Save to database
         saved_count = 0
         failed_count = 0
-        for i, manga_data in enumerate(unique_manga):
-            result = save_manga_to_db(manga_data)
-            if result:
-                saved_count += 1
+        if save_to_db:
+            if create_only:
+                # Only create new manga, don't update existing
+                from api.models import Manga
+                existing_urls = set(Manga.objects.values_list('url', flat=True))
+                
+                for manga_data in unique_manga:
+                    url = manga_data.get('url') or manga_data.get('id')
+                    if url and url not in existing_urls:
+                        try:
+                            title = manga_data.get('title', '')[:500]
+                            cover_url = (manga_data.get('cover_url') or manga_data.get('cover', ''))[:1000]
+                            description = manga_data.get('description', '')[:5000]
+                            
+                            Manga.objects.create(
+                                url=url,
+                                title=title,
+                                cover_url=cover_url,
+                                rating=manga_data.get('rating'),
+                                status=manga_data.get('status', 'Unknown'),
+                                description=description,
+                                alternative_titles=manga_data.get('alternative_titles', []),
+                                chapter_count=manga_data.get('chapter_count', 0),
+                            )
+                            saved_count += 1
+                            print(f"  + Created: {title}")
+                        except Exception as e:
+                            failed_count += 1
+                            print(f"  ✗ Failed to create: {manga_data.get('title', 'Unknown')} - {e}")
             else:
-                failed_count += 1
-                if i < 10:  # Log first 10 failures
-                    print(f"  Failed to save: {manga_data.get('title', 'Unknown')} - URL: {manga_data.get('url', 'N/A')[:50]}")
-        print(f"✓ Saved {saved_count} manga to database (Failed: {failed_count})")
+                # Normal save/update
+                for i, manga_data in enumerate(unique_manga):
+                    result = save_manga_to_db(manga_data)
+                    if result:
+                        saved_count += 1
+                    else:
+                        failed_count += 1
+                        if i < 10:  # Log first 10 failures
+                            print(f"  Failed to save: {manga_data.get('title', 'Unknown')} - URL: {manga_data.get('url', 'N/A')[:50]}")
+        print(f"✓ Processed {saved_count} manga (Failed: {failed_count})")
 
         result = {
             'manga': unique_manga,
