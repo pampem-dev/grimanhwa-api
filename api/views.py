@@ -800,6 +800,19 @@ def get_latest_updates_db(request):
             return None
 
         title_lower = title.lower()
+        now = timezone.now()
+
+        # Pattern: "just now" or "now"
+        if 'just now' in title_lower or re.search(r'\bnow\b', title_lower):
+            return now
+
+        # Pattern: "today"
+        if 'today' in title_lower:
+            return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Pattern: "yesterday"
+        if 'yesterday' in title_lower:
+            return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Pattern: "X hours ago", "X days ago", "X weeks ago", "X months ago"
         ago_match = re.search(r'(\d+)\s*(hour|day|week|month)s?\s+ago', title_lower)
@@ -807,7 +820,6 @@ def get_latest_updates_db(request):
             amount = int(ago_match.group(1))
             unit = ago_match.group(2)
 
-            now = timezone.now()
             if unit == 'hour':
                 return now - timedelta(hours=amount)
             elif unit == 'day':
@@ -851,13 +863,13 @@ def get_latest_updates_db(request):
         def get_sort_date(manga):
             if manga.latest_chapter:
                 chapter = manga.latest_chapter[0]
-                # Try to parse date from title first
+                # Try to parse date from title
                 parsed_date = parse_date_from_title(chapter.title)
                 if parsed_date:
                     return parsed_date
-                # Fallback to created_at if no date in title
-                return chapter.created_at
-            return timezone.now() - timedelta(days=36500)  # Very old date
+                # If can't parse date, return very old date (goes to bottom)
+                return timezone.now() - timedelta(days=36500)
+            return timezone.now() - timedelta(days=36500)
 
         manga_list = sorted(manga_list, key=get_sort_date, reverse=True)
 
