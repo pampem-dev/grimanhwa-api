@@ -73,26 +73,68 @@ def save_manga_to_db(manga_data):
         print(f"✗ Error saving manga to DB ({manga_data.get('title', 'Unknown')}): {e}")
         return None
 
+def chapter_url_key(url):
+    """Stable key for a chapter URL, independent of manga slug changes.
+    Extracts the path from '/chapter/' onward so that manga slug changes
+    (e.g. breakers-3ebcc5a9 -> breakers-ab39de10) don't create duplicates."""
+    if not url:
+        return url
+    url = url.split('?')[0].rstrip('/')
+    idx = url.find('/chapter/')
+    return url[idx:] if idx != -1 else url
+
+
 def save_chapters_to_db(manga, chapters_data):
     """Save or update chapters in the database"""
     try:
+        # Build lookup of existing chapters by stable URL key and chapter_id
+        existing_by_key = {}
+        existing_by_id = {}
+        for ch in Chapter.objects.filter(manga=manga).only('id', 'url', 'chapter_id'):
+            k = chapter_url_key(ch.url or ch.chapter_id)
+            if k:
+                existing_by_key[k] = ch
+            existing_by_id[ch.chapter_id] = ch
+
         chapter_count = 0
         for chapter_data in chapters_data:
             chapter_id = chapter_data.get('id')
             if not chapter_id:
                 continue
 
-            Chapter.objects.update_or_create(
-                chapter_id=chapter_id,
-                defaults={
-                    'manga': manga,
-                    'title': chapter_data.get('title', ''),
-                    'number': chapter_data.get('number', 0),
-                    'url': chapter_data.get('url', chapter_id),
-                    'is_locked': chapter_data.get('is_locked', False),
-                }
-            )
             chapter_count += 1
+            url = chapter_data.get('url', chapter_id)
+            key = chapter_url_key(url)
+
+            # Match existing chapter by URL key first, then chapter_id
+            existing = existing_by_key.get(key) or existing_by_id.get(chapter_id)
+
+            defaults = {
+                'title': chapter_data.get('title', ''),
+                'number': chapter_data.get('number', 0),
+                'url': url,
+                'is_locked': chapter_data.get('is_locked', False),
+            }
+
+            if existing:
+                # Update existing chapter (keep chapter_id stable for read markers)
+                for field, value in defaults.items():
+                    setattr(existing, field, value)
+                existing.save()
+            else:
+                # Check global chapter_id uniqueness (cross-manga edge case)
+                global_match = Chapter.objects.filter(chapter_id=chapter_id).first()
+                if global_match:
+                    for field, value in defaults.items():
+                        setattr(global_match, field, value)
+                    global_match.manga = manga
+                    global_match.save()
+                else:
+                    Chapter.objects.create(
+                        chapter_id=chapter_id,
+                        manga=manga,
+                        **defaults
+                    )
 
         # Update manga chapter count
         manga.chapter_count = chapter_count
@@ -168,19 +210,23 @@ def lightweight_manga_update(manga_url, manga_obj=None):
         if not chapter_items:
             chapter_items = soup.select('a[href*="/chapter/"]')
 
-        # Get existing chapter URLs from database (if manga_obj provided)
-        existing_chapter_urls = set()
+        # Get existing chapters from database (if manga_obj provided)
+        # Map stable URL key -> (chapter id, stored url) to detect slug changes
+        existing_by_key = {}
         if manga_obj:
-            existing_chapter_urls = set(Chapter.objects.filter(manga=manga_obj).values_list('url', flat=True))
+            for ch_id, ch_url in Chapter.objects.filter(manga=manga_obj).values_list('id', 'url'):
+                k = chapter_url_key(ch_url)
+                if k:
+                    existing_by_key[k] = (ch_id, ch_url)
 
         # Process chapters and only save NEW ones
-        seen_urls = set()
+        seen_keys = set()
         new_chapters = []
         for item in chapter_items:
             chapter_url = item.get('href')
             chapter_title = item.get_text(strip=True).split('\n')[0].strip()
 
-            if not chapter_url or chapter_url in seen_urls:
+            if not chapter_url:
                 continue
 
             if not chapter_title or len(chapter_title) < 3:
@@ -193,24 +239,32 @@ def lightweight_manga_update(manga_url, manga_obj=None):
             if not chapter_url.startswith('http'):
                 chapter_url = 'https://asurascans.com' + ('' if chapter_url.startswith('/') else '/') + chapter_url
 
-            seen_urls.add(chapter_url)
+            key = chapter_url_key(chapter_url)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
 
             # Only add if it's a NEW chapter (not in database)
-            if manga_obj and chapter_url not in existing_chapter_urls:
-                chapter_num = extract_chapter_number(chapter_title, chapter_url)
-                is_locked = any(
-                    indicator in item.get('class', []) or
-                    indicator in chapter_title.lower() or
-                    item.select('i[class*="lock"], .lock, .locked')
-                    for indicator in ['lock', 'locked', 'premium', 'paid']
-                )
-                new_chapters.append({
-                    'chapter_id': chapter_url,
-                    'title': chapter_title,
-                    'number': chapter_num,
-                    'url': chapter_url,
-                    'is_locked': is_locked
-                })
+            if manga_obj:
+                match = existing_by_key.get(key)
+                if match is None:
+                    chapter_num = extract_chapter_number(chapter_title, chapter_url)
+                    is_locked = any(
+                        indicator in item.get('class', []) or
+                        indicator in chapter_title.lower() or
+                        item.select('i[class*="lock"], .lock, .locked')
+                        for indicator in ['lock', 'locked', 'premium', 'paid']
+                    )
+                    new_chapters.append({
+                        'chapter_id': chapter_url,
+                        'title': chapter_title,
+                        'number': chapter_num,
+                        'url': chapter_url,
+                        'is_locked': is_locked
+                    })
+                elif match[1] != chapter_url:
+                    # Manga slug changed - update stored url, keep chapter_id stable
+                    Chapter.objects.filter(id=match[0]).update(url=chapter_url)
 
         # Save new chapters to database
         new_chapters_count = 0
@@ -229,7 +283,7 @@ def lightweight_manga_update(manga_url, manga_obj=None):
                 new_chapters_count += 1
 
         # Get total chapter count (existing + new)
-        total_chapter_count = len(seen_urls)
+        total_chapter_count = len(seen_keys)
 
         return total_chapter_count, status, new_chapters_count
 
