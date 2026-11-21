@@ -22,9 +22,8 @@ class Command(BaseCommand):
         manga_id = options.get('manga_id')
         dry_run = options.get('dry_run')
 
-        # Build query - find manga+chapter_number combos with duplicates
-        # Only consider chapters with empty pages list as duplicates
-        queryset = Chapter.objects.filter(pages=[]).values('manga', 'number').annotate(
+        # Build query - find ALL manga+chapter_number combos with duplicates
+        queryset = Chapter.objects.values('manga', 'number').annotate(
             count=Count('id')
         ).filter(count__gt=1)
 
