@@ -9,35 +9,62 @@ from datetime import datetime, timedelta
 class Command(BaseCommand):
     help = 'Update ratings for all manga in the database'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--manga-id',
+            type=str,
+            help='Update rating for a specific manga URL only'
+        )
+        parser.add_argument(
+            '--force',
+            action='store_true',
+            help='Force update even if recently updated'
+        )
+
     def handle(self, *args, **options):
+        manga_id = options.get('manga_id')
+        force = options.get('force')
+        
         self.stdout.write("Starting rating update...")
         self.stdout.write("=" * 50)
 
-        # Get manga that haven't been updated in the last 3 days
-        # This ensures ratings are refreshed periodically
-        three_days_ago = datetime.now() - timedelta(days=3)
-        manga_to_update = Manga.objects.filter(last_updated__lt=three_days_ago)
-        total = manga_to_update.count()
-        total_in_db = Manga.objects.count()
-        recent_count = Manga.objects.filter(last_updated__gte=three_days_ago).count()
+        if manga_id:
+            # Update specific manga
+            manga = Manga.objects.filter(url=manga_id).first()
+            if not manga:
+                self.stdout.write(self.style.ERROR(f'Manga not found: {manga_id}'))
+                return
+            manga_list = [manga]
+        else:
+            # Get manga that haven't been updated in the last 3 days
+            # This ensures ratings are refreshed periodically
+            if force:
+                manga_to_update = Manga.objects.all()
+            else:
+                three_days_ago = datetime.now() - timedelta(days=3)
+                manga_to_update = Manga.objects.filter(last_updated__lt=three_days_ago)
+            
+            total = manga_to_update.count()
+            total_in_db = Manga.objects.count()
+            recent_count = Manga.objects.filter(last_updated__gte=datetime.now() - timedelta(days=3)).count()
 
-        self.stdout.write(f"Total manga in DB: {total_in_db}")
-        self.stdout.write(f"Recently updated (last 3 days): {recent_count} | Needs update: {total}")
-        self.stdout.write(f"Updating {total} manga (limited to 400 per run)")
+            self.stdout.write(f"Total manga in DB: {total_in_db}")
+            self.stdout.write(f"Recently updated (last 3 days): {recent_count} | Needs update: {total}")
+            self.stdout.write(f"Updating {total} manga (limited to 400 per run)")
 
-        if total == 0:
-            self.stdout.write(self.style.SUCCESS("All manga recently updated!"))
-            return
+            if total == 0:
+                self.stdout.write(self.style.SUCCESS("All manga recently updated!"))
+                return
 
-        # Limit to 400 per run for Railway free tier (fast operation)
-        manga_to_update = manga_to_update[:400]
+            # Limit to 400 per run for Railway free tier (fast operation)
+            manga_list = list(manga_to_update[:400])
 
         updated_count = 0
         failed_count = 0
 
         # Update each manga
-        for i, manga in enumerate(manga_to_update, 1):
-            self.stdout.write(f"\n[{i}/{len(manga_to_update)}] Updating: {manga.title}")
+        for i, manga in enumerate(manga_list, 1):
+            self.stdout.write(f"\n[{i}/{len(manga_list)}] Updating: {manga.title}")
 
             try:
                 # Fetch the manga page
@@ -175,6 +202,10 @@ class Command(BaseCommand):
 
         self.stdout.write("\n" + "=" * 50)
         self.stdout.write(self.style.SUCCESS("Rating update complete!"))
-        self.stdout.write(f"✓ Updated: {updated_count}")
-        self.stdout.write(f"✗ Failed: {failed_count}")
-        self.stdout.write(f"⏱️  Remaining manga to update: {max(0, total - 400)}")
+        if manga_id:
+            self.stdout.write(f"✓ Updated: {updated_count}")
+            self.stdout.write(f"✗ Failed: {failed_count}")
+        else:
+            self.stdout.write(f"✓ Updated: {updated_count}")
+            self.stdout.write(f"✗ Failed: {failed_count}")
+            self.stdout.write(f"⏱️  Remaining manga to update: {max(0, total - 400)}")
