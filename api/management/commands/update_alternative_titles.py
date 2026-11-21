@@ -70,7 +70,7 @@ class Command(BaseCommand):
                 # Extract alternative titles - try multiple strategies
                 alternative_titles = []
 
-                # Strategy 1: Look for alternative titles in specific selectors
+                # Strategy 1: Look for alternative titles in specific selectors (AsuraScans format)
                 alt_title_selectors = [
                     'div.flex.items-start.gap-3.mt-3.text-xs',
                     'div.manga-alt-titles',
@@ -81,52 +81,68 @@ class Command(BaseCommand):
                     'div.manga-alternatives',
                     'div.series-alternatives',
                     'div.aka',
-                    'div.aka-titles'
+                    'div.aka-titles',
+                    'div.text-xs.mt-2',  # Common AsuraScans alt titles container
+                    'div.space-y-1.text-xs'  # Another common pattern
                 ]
 
                 for selector in alt_title_selectors:
                     alt_elem = soup.select_one(selector)
                     if alt_elem:
                         alt_text = alt_elem.get_text(strip=True)
+                        # Clean up the text - remove common prefixes/suffixes
+                        alt_text = re.sub(r'^(Alternative Titles?|AKA|Also Known As|Other Names?)[:\s]*', '', alt_text, flags=re.I)
                         # Split by bullet points or common separators
                         titles = re.split(r'[•,;|/]', alt_text)
                         titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
-                        if titles and len(titles) > 1:  # More than one title found
+                        # Filter out non-title text (JSON, URLs, HTML fragments)
+                        titles = [t for t in titles if not re.search(r'[{}\[\]"@]|http|\.webp|\.jpg|\.png|schema\.org|articleSection|mainEntity', t, re.I)]
+                        if titles and len(titles) > 0:
                             alternative_titles = titles
                             break
 
-                # Strategy 2: Look for "AKA" or "Also Known As" patterns in the page
+                # Strategy 2: Look for "AKA" or "Also Known As" in specific elements only
                 if not alternative_titles:
-                    for elem in soup.find_all(string=re.compile(r'(aka|also known as|alternative|other names)', re.I)):
+                    # Look for elements that specifically contain alt title labels
+                    for elem in soup.find_all(['div', 'span', 'p'], string=re.compile(r'(aka|also known as|alternative titles?)', re.I)):
                         parent = elem.parent
-                        if parent:
+                        if parent and parent.name in ['div', 'span', 'p']:
                             parent_text = parent.get_text(strip=True)
-                            # Try to extract titles from the parent text
-                            titles = re.split(r'[•,;|/]', parent_text)
-                            titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
-                            # Filter out the "AKA" or "Also Known As" text itself
-                            titles = [t for t in titles if not re.search(r'(aka|also known as|alternative|other names)', t, re.I)]
-                            if titles and len(titles) > 0:
-                                alternative_titles = titles
-                                break
+                            # Only process if it's reasonably short (not a whole page section)
+                            if len(parent_text) < 500:
+                                # Remove the label itself
+                                parent_text = re.sub(r'(aka|also known as|alternative titles?)[:\s]*', '', parent_text, flags=re.I)
+                                titles = re.split(r'[•,;|/]', parent_text)
+                                titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
+                                # Filter out non-title text
+                                titles = [t for t in titles if not re.search(r'[{}\[\]"@]|http|\.webp|\.jpg|\.png|schema\.org|articleSection|mainEntity|dateModified|datePublished', t, re.I)]
+                                if titles and len(titles) > 0:
+                                    alternative_titles = titles
+                                    break
 
                 # Strategy 3: Look for meta tags with alternative titles
                 if not alternative_titles:
                     meta_alt = soup.find('meta', attrs={'name': 'alternative-title'})
                     if meta_alt and meta_alt.get('content'):
                         titles = re.split(r'[•,;|/]', meta_alt.get('content'))
-                        alternative_titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
+                        titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
+                        titles = [t for t in titles if not re.search(r'[{}\[\]"@]|http|\.webp|\.jpg|\.png', t, re.I)]
+                        if titles:
+                            alternative_titles = titles
 
-                # Strategy 4: Look for any div/span with class containing "alt" or "alternative"
+                # Strategy 4: Look for specific alt title patterns in text content
                 if not alternative_titles:
-                    for elem in soup.find_all(class_=re.compile(r'alt|alternative', re.I)):
-                        text = elem.get_text(strip=True)
-                        if len(text) > 10 and len(text) < 200:  # Reasonable length
-                            titles = re.split(r'[•,;|/]', text)
-                            titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
-                            if titles and len(titles) > 1:
-                                alternative_titles = titles
-                                break
+                    # Look for common AsuraScans alt title patterns
+                    page_text = soup.get_text()
+                    # Pattern: "Alternative Titles:" or "AKA:" followed by titles
+                    alt_match = re.search(r'(?:Alternative Titles?|AKA|Also Known As)[:\s]+([^\n]{10,200})', page_text, re.I)
+                    if alt_match:
+                        alt_text = alt_match.group(1)
+                        titles = re.split(r'[•,;|/]', alt_text)
+                        titles = [t.strip() for t in titles if t.strip() and len(t.strip()) > 2]
+                        titles = [t for t in titles if not re.search(r'[{}\[\]"@]|http|\.webp|\.jpg|\.png', t, re.I)]
+                        if titles:
+                            alternative_titles = titles
 
                 if alternative_titles and len(alternative_titles) > 0:
                     # Remove duplicates and filter out the main title
